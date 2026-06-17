@@ -86,6 +86,201 @@ export const KNOWN_PATTERNS = [
     description: 'Phishing impersonating CVS Health. Sender uses Gmail/Outlook personal accounts instead of @cvshealth.com. Interview via Teams Personal (teams.live.com) not corporate Teams. Targets .edu college addresses.',
     show_bbb: false, any_keyword: true, confirmed_at: 1749599040000,
   },
+
+  // ── IRS / Tax & Government Scams ─────────────────────────────────────────
+  {
+    id: 'irs_tax_smishing', source: 'IRS_SCAM',
+    name: 'IRS Tax Refund / Debt SMS Phishing',
+    scam_type: 'Government Impersonation / Tax Scam',
+    domains: ['irs-refund.com', 'irs-gov.net', 'tax-refund-irs.com', 'myirsgov.com'],
+    sender_tlds: ['.net', '.info', '.xyz'],
+    keywords: [
+      'irs notice', 'tax refund pending', 'unclaimed tax refund',
+      'irs.gov/refund', 'verify your tax information', 'final notice from irs',
+      'failure to respond will result in legal action', 'tax lien',
+      'wage garnishment', 'arrest warrant', 'treasury department',
+      'outstanding tax liability', 'tax account has been flagged',
+    ],
+    description: 'IRS never contacts taxpayers by SMS or unsolicited email. Any text claiming an IRS refund, debt, or legal threat is a scam. Real IRS always sends physical mail first. Senders use spoofed short codes and phishing domains mimicking irs.gov.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+  {
+    id: 'social_security_scam', source: 'FTC_CONFIRMED',
+    name: 'Social Security / SSN Suspension Scam',
+    scam_type: 'Government Impersonation / SSA Scam',
+    keywords: [
+      'social security number has been suspended', 'ssn suspended',
+      'suspicious activity on your social security', 'social security administration',
+      'your benefits will be terminated', 'ssa office',
+      'press 1 to speak with an officer', 'federal arrest warrant',
+      'your account will be seized', 'drug trafficking linked to your ssn',
+      'medicare card renewal', 'new medicare card', 'verify medicare benefits',
+    ],
+    description: 'SSA never suspends SSNs or calls to demand immediate payment. Medicare never calls to issue new cards unsolicited. These calls/texts use fear of arrest or benefit loss to extract SSNs, bank details, or gift card payments.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+  {
+    id: 'uscis_ice_immigration_scam', source: 'USCIS_ALERT',
+    name: 'USCIS / ICE Immigration Threat Scam',
+    scam_type: 'Government Impersonation / Immigration Scam',
+    keywords: [
+      'uscis', 'immigration and customs enforcement', 'ice agent',
+      'your visa has been revoked', 'deportation order', 'removal proceedings',
+      'immigration violation', 'i-94 expired', 'overstayed your visa',
+      'pay fine to avoid deportation', 'your case number', 'dhs officer',
+      'department of homeland security', 'immigration court',
+      'your green card application', 'work authorization suspended',
+    ],
+    description: 'Scammers impersonate USCIS or ICE officers to threaten immigrants with deportation, visa revocation, or arrest unless a fee is paid immediately. USCIS communicates via physical mail only; ICE never demands payment over phone or SMS.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Package Delivery Scams ────────────────────────────────────────────────
+  {
+    id: 'package_delivery_smishing', source: 'USPS_ALERT',
+    name: 'Fake Package Delivery / USPS / FedEx / UPS Smishing',
+    scam_type: 'Smishing / Delivery Impersonation',
+    domains: [
+      'usps-tracking.com', 'usps-redelivery.com', 'fedex-track.net',
+      'ups-delivery.net', 'parcel-track.info', 'delivery-reschedule.com',
+      'package-pending.com', 'dhl-express.net',
+    ],
+    sender_tlds: ['.cn', '.top', '.xyz', '.info'],
+    keywords: [
+      'your package could not be delivered', 'missed delivery attempt',
+      'your parcel is on hold', 'update your delivery address',
+      'customs fee required', 'small redelivery fee',
+      'your usps package', 'your fedex shipment', 'your ups parcel',
+      'dhl express notification', 'tracking number', 'reschedule delivery',
+      'address confirmation required', 'package returned to sender',
+      'pay $0.30 redelivery fee', 'pay customs clearance fee',
+    ],
+    description: 'Smishing campaign impersonating USPS, FedEx, UPS, or DHL. Texts contain fake tracking numbers and links to phishing sites that steal payment card data under the guise of a small redelivery or customs fee. USPS never texts with payment links.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Bank / Account Freeze Scams ───────────────────────────────────────────
+  {
+    id: 'bank_fraud_alert_smishing', source: 'FTC_CONFIRMED',
+    name: 'Fake Bank Fraud Alert / Account Freeze Smishing',
+    scam_type: 'Bank Impersonation / Financial Phishing',
+    domains: [
+      'chase-secure.com', 'wellsfargo-alert.com', 'bofa-verify.com',
+      'citi-fraud.com', 'bankofamerica-secure.net', 'chase-alert.net',
+    ],
+    keywords: [
+      'your account has been locked', 'suspicious transaction detected',
+      'unusual activity on your account', 'verify your account immediately',
+      'your card has been temporarily suspended', 'fraud alert',
+      'your online banking access has been disabled', 'confirm your identity',
+      'zelle transfer pending', 'wire transfer initiated',
+      'your account will be closed', 'call fraud prevention',
+      'chase bank', 'wells fargo', 'bank of america', 'citibank',
+      'capital one alert', 'td bank alert',
+    ],
+    description: 'Fake fraud alerts impersonating major US banks (Chase, Wells Fargo, BofA, Citi, Capital One). Texts link to phishing pages harvesting credentials and OTP codes. Banks send fraud alerts but never ask you to click a link to "verify" — always call the number on your card.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Crypto / Investment Scams ─────────────────────────────────────────────
+  {
+    id: 'crypto_pig_butchering', source: 'FBI_IC3',
+    name: 'Crypto / Pig Butchering Investment Scam',
+    scam_type: 'Investment Fraud / Crypto Scam',
+    domains: [
+      'coinbase-pro-trade.com', 'binance-vip.net', 'crypto-invest-platform.com',
+      'btc-recover.com', 'bitcoin-recovery.net',
+    ],
+    keywords: [
+      'investment opportunity', 'guaranteed returns', 'crypto trading platform',
+      'i can teach you how to trade', 'passive income', '300% profit',
+      'withdraw your profits', 'trading bot', 'liquidity mining',
+      'defi staking rewards', 'pig butchering', 'sha-256 mining',
+      'my uncle works at binance', 'wrong number', 'i thought you were',
+      'bitcoin recovery service', 'recover lost crypto',
+      'pay a small fee to unlock your funds', 'your wallet has been frozen',
+    ],
+    description: 'Pig butchering (sha zhu pan): scammer builds relationship over weeks, introduces "investment platform," victim deposits increasing amounts, then platform disappears. Also covers fake crypto recovery services that charge fees to "recover" already-lost funds.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Tech Support Scams ────────────────────────────────────────────────────
+  {
+    id: 'tech_support_scam', source: 'MICROSOFT_ALERT',
+    name: 'Fake Microsoft / Apple Tech Support Scam',
+    scam_type: 'Tech Support Scam',
+    keywords: [
+      'your computer has been hacked', 'virus detected on your device',
+      'your windows license has expired', 'call microsoft support',
+      'call apple support immediately', 'your apple id has been compromised',
+      'do not shut down your computer', 'your device is sending error reports',
+      'geek squad renewal', 'norton antivirus renewal', 'mcafee subscription',
+      'your subscription will auto-renew', 'call to cancel',
+      'remote access', 'allow us to fix your computer',
+      'your ip address has been flagged', 'illegal activity detected',
+    ],
+    description: 'Pop-up or email scam impersonating Microsoft, Apple, Geek Squad, Norton, or McAfee. Victim is pressured to call a fake support number and grant remote access, leading to credential theft, fake repair fees, or ransomware. Microsoft/Apple never cold-contact users about infections.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Lottery / Prize Scams ─────────────────────────────────────────────────
+  {
+    id: 'lottery_prize_scam', source: 'FTC_CONFIRMED',
+    name: 'Lottery / Sweepstakes / Prize Winner Scam',
+    scam_type: 'Lottery Scam / Advance Fee Fraud',
+    keywords: [
+      'you have won', 'congratulations you are a winner', 'prize winner notification',
+      'claim your $1,000,000', 'powerball winner', 'mega millions notification',
+      'publisher\'s clearing house', 'pch winner', 'unclaimed prize',
+      'google lottery winner', 'facebook lottery', 'whatsapp lottery',
+      'claim your prize within 24 hours', 'processing fee to release your prize',
+      'taxes on your winnings', 'send gift card to claim',
+      'western union to collect', 'advance fee', 'nigerian prince',
+    ],
+    description: 'Advance fee fraud: victim told they won a lottery/prize but must pay processing fees, taxes, or "insurance" upfront to collect. Variations impersonate PCH, Google, Facebook, WhatsApp, or real lotteries. No legitimate prize requires upfront payment.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Online Retail / Purchase Scams ────────────────────────────────────────
+  {
+    id: 'online_retail_fraud', source: 'BBB_SCAM_TRACKER',
+    name: 'Fake Online Retail / Purchase Fraud',
+    scam_type: 'Online Shopping Fraud / Counterfeit Goods',
+    domains: [
+      'amazon-order-issue.com', 'paypal-resolution.net', 'ebay-buyer-protection.com',
+    ],
+    keywords: [
+      'your amazon order has been cancelled', 'problem with your amazon account',
+      'your paypal account is limited', 'unauthorized paypal transaction',
+      'confirm your order', 'your package was flagged',
+      'too good to be true', 'clearance sale 90% off',
+      'verify your purchase', 'your ebay buyer protection claim',
+      'refund for your recent purchase', 'account suspension notice',
+      'we were unable to process your payment', 'update billing information',
+    ],
+    description: 'Phishing impersonating Amazon, PayPal, or eBay with fake order cancellations, account limitations, or unauthorized transaction alerts. Links lead to credential-harvesting pages. Also covers too-good-to-be-true storefront scams that take payment and ship nothing.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
+
+  // ── Rental / Real Estate Fraud ────────────────────────────────────────────
+  {
+    id: 'rental_real_estate_fraud', source: 'FTC_CONFIRMED',
+    name: 'Fake Rental Listing / Real Estate Fraud',
+    scam_type: 'Rental Fraud / Real Estate Scam',
+    keywords: [
+      'rental listing', 'available for rent', 'no credit check required',
+      'send first and last month', 'wire deposit to hold the property',
+      'i am currently overseas', 'missionary abroad', 'send via zelle to reserve',
+      'venmo the deposit', 'cashapp the security deposit',
+      'craigslist rental', 'facebook marketplace rental',
+      'below market rent', 'all utilities included',
+      'i will mail you the keys', 'no need to view in person',
+      'airbnb outside platform', 'contact landlord directly',
+      'property management company', 'zillow rental fraud',
+    ],
+    description: 'Scammer posts stolen listing photos on Craigslist, Facebook Marketplace, or Zillow at below-market rent. Claims to be overseas and demands deposit via wire, Zelle, Venmo, or CashApp before any viewing. Real landlords never demand payment before a showing or lease signing.',
+    show_bbb: false, any_keyword: true, confirmed_at: 1749600000000,
+  },
 ];
 
 /**
