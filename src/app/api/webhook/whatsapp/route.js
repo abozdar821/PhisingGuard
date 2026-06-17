@@ -10,6 +10,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { putScan, getPatterns, getTrainingData } from '@/lib/dynamodb';
 import { KNOWN_PATTERNS, buildSystemPrompt, extractURLs, scoreToRiskLevel } from '@/lib/patterns';
@@ -30,10 +31,26 @@ export async function GET(request) {
   return new Response('Forbidden', { status: 403 });
 }
 
+// ── Verify Meta payload signature ─────────────────────────────────────────
+function verifySignature(rawBody, signature) {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) return true; // skip in dev if not configured
+  if (!signature.startsWith('sha256=')) return false;
+  const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+  if (signature.length !== expected.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected)); } catch { return false; }
+}
+
 // ── Receive & scan messages ────────────────────────────────────────────────
 export async function POST(request) {
   try {
-    const body = await request.json();
+    const rawBody  = await request.text();
+    const signature = request.headers.get('x-hub-signature-256') || '';
+    if (!verifySignature(rawBody, signature)) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    const body = JSON.parse(rawBody);
 
     const entry    = body?.entry?.[0];
     const changes  = entry?.changes?.[0];

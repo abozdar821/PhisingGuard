@@ -57,11 +57,7 @@ export async function POST(request) {
           continue;
         }
 
-        // Acknowledge immediately
-        await sendMessengerReply(senderId, '🔍 Scanning your message for phishing threats... Please wait a moment.');
-
-        // Run scan and reply (fire and forget per event so Meta doesn't timeout)
-        runScanAndReply(msgText, senderId).catch(err => console.error('Messenger scan error:', err));
+        await runScanAndReply(msgText, senderId);
       }
     }
 
@@ -79,6 +75,7 @@ function verifySignature(rawBody, signature) {
   if (!appSecret) return true; // skip in dev if not configured
   if (!signature.startsWith('sha256=')) return false;
   const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+  if (signature.length !== expected.length) return false;
   try { return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected)); } catch { return false; }
 }
 
