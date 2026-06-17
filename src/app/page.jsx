@@ -454,7 +454,7 @@ export default function PhishGuardApp() {
           <div style={S.ssec}>
             <div style={S.ssTitle}>📊 App Status</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:7 }}>
-              {[['8','Threat Patterns in DynamoDB'],['Confirmed Scams',String(confirmedCount)],['AWS DynamoDB','Connected'],['Vercel','Deployed']].map(([label, val], i) => (
+              {[['18','Threat Patterns in DynamoDB'],['Confirmed Scams',String(confirmedCount)],['AWS DynamoDB','Connected'],['Vercel','Deployed']].map(([label, val], i) => (
                 <div key={i} style={{ background:'rgba(255,255,255,.02)', border:'1px solid rgba(148,163,184,.1)', borderRadius:7, padding:'9px 11px' }}>
                   <div style={{ fontSize:typeof val==='number'||/^\d/.test(val)?16:12, fontWeight:800, color:'#22d3ee' }}>{/^\d/.test(label)?label:val}</div>
                   <div style={{ fontSize:10, color:'#475569', marginTop:2 }}>{/^\d/.test(label)?val:label}</div>
