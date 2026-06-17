@@ -99,8 +99,13 @@ export default function PhishGuardApp() {
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [lastScanAt, setLastScanAt] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [uploadMode,    setUploadMode]    = useState(false);
+  const [extracting,    setExtracting]    = useState(false);
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [dragOver,      setDragOver]      = useState(false);
   const { toasts, show: toast } = useToast();
-  const bodyRef = useRef();
+  const bodyRef    = useRef();
+  const fileRef    = useRef();
 
   useEffect(() => {
     fetch('/api/history?userId=public&limit=50')
@@ -152,6 +157,43 @@ export default function PhishGuardApp() {
     } finally {
       setScanning(false); setScanStep('');
     }
+  }
+
+  /* ── Screenshot extract ───────────────────────────────────────────── */
+  async function handleImageUpload(file) {
+    if (!file) return;
+    if (!['image/jpeg','image/png','image/webp','image/gif'].includes(file.type)) {
+      toast('Please upload a JPEG, PNG, or WebP image.', 'warn'); return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast('Image must be under 5 MB.', 'warn'); return;
+    }
+    setUploadPreview(URL.createObjectURL(file));
+    setExtracting(true);
+    try {
+      const form = new FormData();
+      form.append('image', file);
+      const res = await fetch('/api/extract', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed');
+      setBody(data.text || '');
+      if (data.sender)  setSender(data.sender);
+      if (data.subject) setSubject(data.subject);
+      if (data.mode)    setScanMode(data.mode);
+      setUploadMode(false);
+      setUploadPreview(null);
+      toast(`Text extracted${data.confidence < 0.6 ? ' (low confidence — please verify)' : ' ✓'}`, data.confidence < 0.6 ? 'warn' : 'success');
+    } catch (err) {
+      toast('Extract error: ' + err.message, 'error');
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault(); setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleImageUpload(file);
   }
 
   /* ── Training ─────────────────────────────────────────────────────── */
@@ -314,6 +356,12 @@ export default function PhishGuardApp() {
         .pg-status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .pg-status-item { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px 14px; }
 
+        /* Upload zone */
+        .pg-upload-zone { border: 2px dashed #CBD5E1; border-radius: 14px; padding: 40px 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: #F8FAFC; }
+        .pg-upload-zone:hover, .pg-upload-zone.drag { border-color: #2563EB; background: #EFF6FF; }
+        .pg-upload-zone.extracting { border-color: #93C5FD; background: #EFF6FF; cursor: wait; }
+        .pg-upload-preview { width: 100%; max-height: 280px; object-fit: contain; border-radius: 10px; border: 1px solid #E2E8F0; margin-bottom: 14px; }
+
         /* Empty state */
         .pg-empty { text-align: center; padding: 60px 24px; }
 
@@ -387,37 +435,74 @@ export default function PhishGuardApp() {
             <div className="pg-card">
               <div className="pg-card-title">Analyze Message</div>
 
+              {/* Mode toggle — SMS / Email / Screenshot */}
               <div className="pg-mode">
-                <button className={`pg-mbtn${scanMode === 'sms' ? ' active' : ''}`} onClick={() => setScanMode('sms')}>📱  SMS / Text</button>
-                <button className={`pg-mbtn${scanMode === 'email' ? ' active' : ''}`} onClick={() => setScanMode('email')}>📧  Email</button>
+                <button className={`pg-mbtn${!uploadMode && scanMode === 'sms' ? ' active' : ''}`} onClick={() => { setUploadMode(false); setScanMode('sms'); }}>📱  SMS</button>
+                <button className={`pg-mbtn${!uploadMode && scanMode === 'email' ? ' active' : ''}`} onClick={() => { setUploadMode(false); setScanMode('email'); }}>📧  Email</button>
+                <button className={`pg-mbtn${uploadMode ? ' active' : ''}`} onClick={() => { setUploadMode(true); setUploadPreview(null); }}>📷  Screenshot</button>
               </div>
 
-              <div className="pg-field">
-                <div className="pg-field-label">Sender</div>
-                <input className="pg-input" value={sender} onChange={e => setSender(e.target.value)} maxLength={500} placeholder="Phone number, short code, or email address" />
-              </div>
-
-              {scanMode === 'email' && (
-                <div className="pg-field">
-                  <div className="pg-field-label">Subject</div>
-                  <input className="pg-input" value={subject} onChange={e => setSubject(e.target.value)} maxLength={500} placeholder="Email subject line" />
+              {/* ── Screenshot upload zone ── */}
+              {uploadMode ? (
+                <div>
+                  <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display:'none' }} onChange={e => handleImageUpload(e.target.files?.[0])} />
+                  {uploadPreview && <img src={uploadPreview} className="pg-upload-preview" alt="Preview" />}
+                  <div
+                    className={`pg-upload-zone${dragOver ? ' drag' : ''}${extracting ? ' extracting' : ''}`}
+                    onClick={() => !extracting && fileRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                  >
+                    {extracting ? (
+                      <>
+                        <div style={{ fontSize:36, marginBottom:12 }}>⏳</div>
+                        <div style={{ fontSize:15, fontWeight:700, color:'#2563EB', marginBottom:6 }}>Extracting text with AI…</div>
+                        <div style={{ fontSize:13, color:'#64748B' }}>Claude Vision is reading your screenshot</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize:40, marginBottom:12 }}>📷</div>
+                        <div style={{ fontSize:15, fontWeight:700, color:'#1E293B', marginBottom:6 }}>Drop a screenshot here</div>
+                        <div style={{ fontSize:13, color:'#64748B', marginBottom:16 }}>or click to browse — JPEG, PNG, WebP up to 5 MB</div>
+                        <div style={{ display:'inline-block', padding:'9px 22px', background:'#2563EB', color:'#fff', borderRadius:9, fontSize:13, fontWeight:700 }}>Choose File</div>
+                        <div style={{ marginTop:14, fontSize:12, color:'#94A3B8', lineHeight:1.6 }}>
+                          Take a screenshot of a suspicious SMS, WhatsApp message, or email<br/>and upload it here. AI will extract the text automatically.
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <div className="pg-field">
+                    <div className="pg-field-label">Sender</div>
+                    <input className="pg-input" value={sender} onChange={e => setSender(e.target.value)} maxLength={500} placeholder="Phone number, short code, or email address" />
+                  </div>
+
+                  {scanMode === 'email' && (
+                    <div className="pg-field">
+                      <div className="pg-field-label">Subject</div>
+                      <input className="pg-input" value={subject} onChange={e => setSubject(e.target.value)} maxLength={500} placeholder="Email subject line" />
+                    </div>
+                  )}
+
+                  <div className="pg-field">
+                    <div className="pg-field-label">
+                      Message
+                      <span className={`pg-char-count${body.length > 9000 ? ' warn' : ''}`}>{body.length.toLocaleString()} / 10,000</span>
+                    </div>
+                    <textarea ref={bodyRef} className="pg-textarea" value={body} onChange={e => setBody(e.target.value)} maxLength={10000} rows={5} placeholder="Paste the suspicious message here…" />
+                  </div>
+
+                  <button className="pg-scan-btn" disabled={scanning} onClick={doScan}>
+                    {scanning ? `⏳  ${scanStep || 'Analyzing…'}` : '🔍  Scan Message'}
+                  </button>
+                  <div className="pg-scan-hint">
+                    Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to scan
+                  </div>
+                </>
               )}
-
-              <div className="pg-field">
-                <div className="pg-field-label">
-                  Message
-                  <span className={`pg-char-count${body.length > 9000 ? ' warn' : ''}`}>{body.length.toLocaleString()} / 10,000</span>
-                </div>
-                <textarea ref={bodyRef} className="pg-textarea" value={body} onChange={e => setBody(e.target.value)} maxLength={10000} rows={5} placeholder="Paste the suspicious message here…" />
-              </div>
-
-              <button className="pg-scan-btn" disabled={scanning} onClick={doScan}>
-                {scanning ? `⏳  ${scanStep || 'Analyzing…'}` : '🔍  Scan Message'}
-              </button>
-              <div className="pg-scan-hint">
-                Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to scan
-              </div>
             </div>
 
             {/* Result Card */}
