@@ -175,6 +175,19 @@ DEBT_COMPANIES = ["harris & harris", "harris&harris", "harriscollect"]
 _URL_RE = re.compile(r"\bhttps?://[^\s<>\"']+|(?<![@\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})(?:/[^\s<>\"']*)?", re.I)
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})(?!\d)")
 
+_PRIVATE_NETS = [ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "169.254.0.0/16")]
+
+
+def _is_private_host(host: str) -> bool:
+    """Return True when host is a raw private/loopback/link-local IP (SSRF guard)."""
+    try:
+        addr = ipaddress.ip_address(host)
+        return any(addr in net for net in _PRIVATE_NETS)
+    except ValueError:
+        return False
+
 
 def _phrase_rx(phrase: str) -> re.Pattern:
     p = re.escape(phrase.lower())
@@ -212,6 +225,8 @@ def extract_links(text: str) -> list[dict]:
         except ValueError:
             continue
         if host and raw not in seen:
+            if _is_private_host(host):
+                continue  # reject raw private/loopback IP URLs (SSRF protection)
             seen.add(raw)
             links.append({"url": raw, "host": host, "domain": _registered_domain(host)})
     return links
@@ -1003,14 +1018,14 @@ OPEN_PATHS = {"/", "/manifest.webmanifest", "/sw.js", "/api/health", "/api/sessi
 
 
 def _authorized() -> bool:
-    if APP_TOKEN:
-        given = request.headers.get("X-PhishGuard-Token") or request.cookies.get("pg_token") or ""
-        return hmac.compare_digest(given, APP_TOKEN)
-    try:
-        addr = ipaddress.ip_address(_client_ip())
-    except ValueError:
+    if not APP_TOKEN:
+        _log.warning(
+            "PHISHGUARD_TOKEN is not set — access is denied until a token is configured. "
+            "Set the PHISHGUARD_TOKEN environment variable before exposing this service."
+        )
         return False
-    return any(addr in n for n in TRUSTED_NETS)
+    given = request.headers.get("X-PhishGuard-Token") or request.cookies.get("pg_token") or ""
+    return hmac.compare_digest(given, APP_TOKEN)
 
 
 @app.before_request
@@ -1104,7 +1119,10 @@ def pg_scan_route():
         return jsonify({"error": "Paste a message (and its sender) to check"}), 400
     if len(body) > 5000 or len(sender) > 200 or len(subject) > 300:
         return jsonify({"error": "Message too long (max 5,000 characters)"}), 413
-    return jsonify(_public_scan(_do_scan(str(d.get("mode", "sms")), sender, subject, body)))
+    mode = str(d.get("mode", "sms"))
+    if mode not in ("sms", "email", "whatsapp", "messenger"):
+        mode = "sms"
+    return jsonify(_public_scan(_do_scan(mode, sender, subject, body)))
 
 
 @app.route("/api/phishguard/screenshot", methods=["POST"])
@@ -1180,6 +1198,8 @@ def pg_scans_clear():
 
 @app.route("/api/phishguard/feedback", methods=["POST"])
 def pg_feedback():
+    if not _rate_ok("feedback", 20):
+        return jsonify({"error": "Too many feedback submissions — wait a minute"}), 429
     d = request.get_json(silent=True) or {}
     verdict = d.get("verdict")
     if verdict not in ("scam", "safe"):
@@ -1205,6 +1225,8 @@ def pg_training():
 
 @app.route("/api/phishguard/training/remove", methods=["POST"])
 def pg_training_remove():
+    if not _rate_ok("train", 15):
+        return jsonify({"error": "Too many training requests — wait a minute"}), 429
     d = request.get_json(silent=True) or {}
     table = "allow" if d.get("table") == "allow" else "iocs"
     if PG_STORE.remove(table, str(d.get("kind", "")), str(d.get("value", ""))):
