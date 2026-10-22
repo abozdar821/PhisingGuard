@@ -1,0 +1,35 @@
+From: Susan Easington <hr@trailheadbiosys.com>
+To: jordan.lee@example.com
+Reply-To: susan.easington.hr@gmail.com
+Subject: Available opportunity for an IT Specialist at Trailhead Biosystems
+Authentication-Results: mx.google.com; spf=pass
+ smtp.mailfrom=trailheadbiosys.com; dkim=pass header.i=@trailheadbiosys.com;
+ dmarc=pass header.from=trailheadbiosys.com
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6415574593062261828=="
+
+--===============6415574593062261828==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Dear Ali,
+
+Thank you for applying for the Remote IT Specialist position with Trailhead B=
+iosystems. After carefully reviewing your resume we are impressed with your e=
+xperience. We would like to invite you to participate in an online interview =
+with our hiring manager. Please let us know your best availability to connect.
+
+Susan Easington
+Manager, HR Services
+Trailhead Biosystems
+
+--===============6415574593062261828==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Dear Ali,</p><p>Thank you for applying for the Remote IT Speci=
+alist position with <b>Trailhead Biosystems</b>.</p></body></html>
+
+--===============6415574593062261828==--

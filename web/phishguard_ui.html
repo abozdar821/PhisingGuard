@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PhishGuard</title>
+<script>try { var th = localStorage.getItem("phishguard.theme"); if (th === "light" || th === "dark") document.documentElement.setAttribute("data-theme", th); } catch (e) {}</script>
+<!--__HEAD_EXTRA__-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Nastaliq+Urdu:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --panel-2:#f1f4f9; --line:#e2e7ef; --line-2:#cbd3e0;
+  --text:#0f172a; --muted:#475569; --faint:#64748b; --accent:#0f766e; --accent-ink:#ffffff; --accent-soft:rgba(15,118,110,.08);
+  --t-critical:#be123c; --t-high:#c2410c; --t-medium:#a16207; --t-low:#0369a1; --t-info:#475569; --ok-ink:#047857;
+  --crit:#f43f5e; --high:#fb923c; --med:#facc15; --low:#38bdf8; --info:#64748b; --ok:#34d399;
+  --bar-bg:rgba(255,255,255,.94); color-scheme:light;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --tabbar:64px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0b1020; --panel:#111a2e; --panel-2:#16203a; --line:#1f2b47; --line-2:#2c3a5c;
+  --text:#e5ebf6; --muted:#a0aecb; --faint:#7d8bab; --accent:#2dd4bf; --accent-ink:#04201c; --accent-soft:rgba(45,212,191,.08);
+  --t-critical:#fda4af; --t-high:#fdba74; --t-medium:#fde047; --t-low:#7dd3fc; --t-info:#cbd5e1; --ok-ink:#6ee7b7;
+  --bar-bg:rgba(13,19,36,.94); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0b1020; --panel:#111a2e; --panel-2:#16203a; --line:#1f2b47; --line-2:#2c3a5c;
+  --text:#e5ebf6; --muted:#a0aecb; --faint:#7d8bab; --accent:#2dd4bf; --accent-ink:#04201c; --accent-soft:rgba(45,212,191,.08);
+  --t-critical:#fda4af; --t-high:#fdba74; --t-medium:#fde047; --t-low:#7dd3fc; --t-info:#cbd5e1; --ok-ink:#6ee7b7;
+  --bar-bg:rgba(13,19,36,.94); color-scheme:dark}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 70px)}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5}
+button{font-family:inherit;cursor:pointer;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;display:flex;align-items:center;gap:12px;padding:12px 18px;
+  background:var(--bar-bg);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+.mark{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,#134e4a,#0f766e);color:#fff;font-size:17px}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line-2);color:var(--muted)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.pill.down .dot{background:var(--crit)}
+.tabs-top{display:flex;gap:4px}
+.tab{background:transparent;border:0;color:var(--muted);font-weight:600;font-size:14px;padding:7px 14px;border-radius:8px}
+.tab[aria-selected="true"]{background:var(--panel-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2)}
+
+main{max-width:760px;margin:0 auto;padding:18px 16px calc(var(--tabbar) + 30px)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden}
+.card-h{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.card-t{font-weight:600;font-size:15px}
+.card-sub{font-size:12.5px;color:var(--faint)}
+.pad{padding:16px}
+h1.hello{font-size:22px;line-height:1.25;margin:4px 2px 4px;letter-spacing:-.01em}
+p.lede{color:var(--muted);margin:0 2px 16px;font-size:14.5px}
+
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;
+  border:1.5px dashed var(--line-2);border-radius:12px;padding:26px 16px;background:var(--accent-soft);cursor:pointer;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--accent)}
+.drop b{font-size:16px}
+.drop span{font-size:13px;color:var(--muted)}
+.drop .big{font-size:30px;line-height:1}
+.or{display:flex;align-items:center;gap:10px;color:var(--faint);font-size:12.5px;margin:14px 0}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;
+  border:1px solid var(--line-2);background:var(--panel-2);transition:.15s;min-height:42px}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{background:rgba(244,63,94,.1);border-color:rgba(244,63,94,.45);color:var(--t-critical)}
+.btn.ok{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.45);color:var(--ok-ink)}
+.btn.ghost{background:transparent}
+.btn.sm{min-height:32px;padding:5px 10px;font-size:12.5px;border-radius:8px}
+.btn.wide{width:100%}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.seg{display:inline-flex;background:var(--bg);border:1px solid var(--line-2);border-radius:9px;padding:2px}
+.seg button{background:transparent;border:0;color:var(--muted);font-size:13px;font-weight:600;padding:6px 12px;border-radius:7px}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.fld{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.fld>span{font-size:12.5px;color:var(--muted);font-weight:600}
+.fld input,.fld textarea{background:var(--bg);border:1px solid var(--line-2);border-radius:10px;color:var(--text);padding:11px 12px;
+  font-family:var(--mono);font-size:14px;resize:vertical;line-height:1.5;width:100%}
+.fld input:focus,.fld textarea:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.fld input::placeholder,.fld textarea::placeholder{color:var(--faint)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+details.ex summary{cursor:pointer;color:var(--muted);font-size:13.5px;padding:2px 0}
+.ex-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.exb{display:inline-flex;gap:7px;align-items:center;background:var(--panel-2);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;font-size:13px}
+.etag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:.04em}
+.etag.BBB{background:rgba(244,63,94,.14);color:var(--t-critical)}.etag.JOB{background:rgba(251,146,60,.16);color:var(--t-high)}
+.etag.SPAM{background:rgba(148,163,184,.18);color:var(--t-info)}.etag.PHISH{background:rgba(250,204,21,.18);color:var(--t-medium)}
+.etag.SAFE{background:rgba(52,211,153,.16);color:var(--ok-ink)}
+.note{font-size:12.5px;color:var(--faint);line-height:1.5}
+.warn{font-size:13px;color:var(--t-high);background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.3);border-radius:10px;padding:10px 12px}
+
+.upload{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.upload-btn{cursor:pointer;min-height:46px;padding:10px 18px;font-size:15px}
+.upload .note{flex:1;min-width:180px;flex-basis:100%}
+.links{list-style:none;display:flex;flex-direction:column;gap:10px}
+.links li{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;background:var(--panel-2)}
+.links .lh{font-weight:600;font-size:14px;word-break:break-all}
+.links .lu{font-family:var(--mono);font-size:12px;color:var(--faint);word-break:break-all;margin:2px 0 8px}
+.openwarn{margin-top:8px;padding:10px 12px;border-radius:10px;border:1px solid rgba(244,63,94,.45);background:rgba(244,63,94,.08)}
+.openwarn p{font-size:13px;margin-bottom:8px}
+a.btn{text-decoration:none;color:inherit}
+a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
+.links .lf{font-size:12.5px;color:var(--muted);margin:-4px 0 8px;word-break:break-all}
+#drop.over{outline:2px dashed var(--accent);outline-offset:-6px}
+.fileicon{display:grid;place-items:center;font-size:34px}
+.reading{display:flex;gap:14px;align-items:center}
+.thumb{width:74px;height:110px;border-radius:10px;object-fit:cover;object-position:top;border:1px solid var(--line-2);background:var(--panel-2);flex-shrink:0}
+.spin{width:18px;height:18px;border:2.5px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:-3px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.readby{font-size:12px;color:var(--faint);font-family:var(--mono)}
+
+.hero{display:flex;gap:18px;align-items:center;padding:20px 18px 14px}
+.gauge{position:relative;width:104px;height:104px;flex-shrink:0}
+.gauge svg{transform:rotate(-90deg)}
+.gauge .bg{stroke:var(--line)}
+.gauge .fg{transition:stroke-dashoffset .8s cubic-bezier(.4,0,.2,1)}
+.gauge-n{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+.gauge-n b{font-family:var(--mono);font-size:28px;line-height:1}
+.gauge-n small{display:block;font-size:10.5px;color:var(--faint);margin-top:2px}
+.verdict{font-size:23px;font-weight:700;line-height:1.15}
+.cat{color:var(--muted);margin:3px 0 8px}
+.sev{display:inline-flex;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
+.sev.critical{color:var(--t-critical);background:rgba(244,63,94,.14);border:1px solid rgba(244,63,94,.45)}
+.sev.high{color:var(--t-high);background:rgba(251,146,60,.14);border:1px solid rgba(251,146,60,.45)}
+.sev.medium{color:var(--t-medium);background:rgba(250,204,21,.14);border:1px solid rgba(250,204,21,.45)}
+.sev.low{color:var(--t-low);background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.4)}
+.sev.info{color:var(--t-info);background:rgba(100,116,139,.14);border:1px solid rgba(100,116,139,.4)}
+.sub{font-size:12px;color:var(--faint);font-family:var(--mono);margin-left:6px}
+.box{margin:0 18px 14px;padding:12px 14px;border-radius:10px;font-size:13.5px;line-height:1.55}
+.box.bbb{background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.35)}
+.box.bbb b{color:var(--t-critical)} .box a{color:var(--accent)}
+.box.ai{background:var(--accent-soft);border:1px solid rgba(45,212,191,.3)}
+.box.off{border:1px solid var(--line-2);color:var(--muted)}
+.ai-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.ai-s{margin-left:auto;font-family:var(--mono);font-weight:600}
+.sect{font-size:12.5px;font-weight:700;color:var(--faint);margin:6px 0 8px}
+.sec{padding:0 18px 14px}
+.flags{list-style:none}
+.flags li{display:grid;grid-template-columns:40px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.flags li:last-child{border-bottom:0}
+.pts{font-family:var(--mono);font-weight:600;font-size:12.5px;text-align:right;padding-top:1px}
+.mod{display:block;font-size:11.5px;color:var(--faint);margin-top:2px}
+.steps{padding-left:20px;font-size:14px;display:flex;flex-direction:column;gap:6px}
+.fb{margin:4px 18px 18px;padding:14px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line-2)}
+.fb-q{font-weight:600;margin-bottom:4px}
+.fb-s{font-size:13px;color:var(--muted);margin-bottom:10px}
+
+.list-item{display:flex;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.list-item:last-child{border-bottom:0}
+.list-item:hover{background:var(--accent-soft)}
+.grow{flex:1;min-width:0}
+.t1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t2{font-size:12.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.score{font-family:var(--mono);font-size:13px;color:var(--muted);width:28px;text-align:right}
+.empty{padding:28px 18px;text-align:center;color:var(--faint);font-size:13.5px}
+.empty strong{display:block;color:var(--muted);margin-bottom:4px;font-size:14.5px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line)}
+.stat{background:var(--panel);padding:14px 16px}
+.stat b{display:block;font-family:var(--mono);font-size:24px;font-weight:600}
+.stat span{font-size:12.5px;color:var(--muted)}
+.ioc{display:flex;gap:8px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--line);font-size:13.5px}
+.ioc .v{flex:1;min-width:0;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ioc .k{font-size:12px;color:var(--faint);width:58px;flex-shrink:0}
+.tag{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px;background:rgba(148,163,184,.14);color:var(--muted);border:1px solid rgba(148,163,184,.25)}
+.subh{padding:14px 16px 4px;font-size:12.5px;font-weight:700;color:var(--faint)}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13.5px;padding:14px 16px}
+.kv dt{color:var(--faint)} .kv dd{word-break:break-word}
+
+.devtag{font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:5px;background:rgba(251,146,60,.16);color:var(--t-high);border:1px solid rgba(251,146,60,.4)}
+.brand{user-select:none;-webkit-user-select:none;cursor:default}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:45;display:flex;justify-content:space-around;
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));background:var(--bar-bg);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+.tabbar button{flex:1;max-width:160px;display:flex;flex-direction:column;align-items:center;gap:2px;background:transparent;border:0;
+  color:var(--faint);font-size:11.5px;font-weight:600;padding:6px 4px;border-radius:10px}
+.tabbar button .ic{font-size:20px;line-height:1}
+.tabbar button[aria-selected="true"]{color:var(--accent);background:var(--accent-soft)}
+.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabbar) + 16px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;flex-direction:column;gap:8px;width:max-content;max-width:92vw}
+.toast{background:var(--panel-2);border:1px solid var(--line-2);padding:10px 14px;border-radius:10px;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.25);animation:up .2s ease}
+.toast.err{border-color:rgba(244,63,94,.55)}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.iconbtn{width:38px;height:38px;flex-shrink:0;border-radius:999px;border:1px solid var(--line-2);background:var(--panel);display:grid;place-items:center;font-size:17px;line-height:1;padding:0}
+.iconbtn:hover{border-color:var(--faint)}
+.langpick{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line-2);border-radius:999px;padding:2px 4px 2px 9px;background:var(--panel)}
+.langpick select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:var(--text);font:600 13px var(--sans);padding:4px 6px;cursor:pointer;max-width:110px}
+.langpick select:focus-visible{outline:none}
+.langpick:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.msglang{font-size:12.5px;color:var(--faint);margin:-2px 0 8px}
+.steps{padding-left:0;padding-inline-start:20px}
+.pts{text-align:end}
+.fld textarea,.fld input{text-align:start}
+:root:lang(ur) .fld input,:root:lang(ur) .fld textarea,:root:lang(hi) .fld input,:root:lang(hi) .fld textarea{font-family:var(--sans)}
+.pts,.gauge-n,.sub{direction:ltr;unicode-bidi:isolate}
+:root[dir="rtl"] .fld input:placeholder-shown,:root[dir="rtl"] .fld textarea:placeholder-shown{direction:rtl}
+.fld input:dir(rtl),.fld textarea:dir(rtl){font-family:'Noto Nastaliq Urdu',var(--sans);line-height:2}
+:root:lang(hi){--sans:'Noto Sans Devanagari','IBM Plex Sans',system-ui,sans-serif}
+:root:lang(ur){--sans:'Noto Nastaliq Urdu','IBM Plex Sans',system-ui,sans-serif}
+:root:lang(ur) body{line-height:2.05}
+:root:lang(ur) .verdict,:root:lang(ur) h1.hello{line-height:1.9}
+:root:lang(ur) .btn{padding-top:4px;padding-bottom:4px}
+:root:lang(ur) .t1,:root:lang(ur) .t2{line-height:2.1}
+[dir="rtl"] .gauge svg{transform:rotate(-90deg) scaleY(-1)}
+@media (max-width:420px){.pill#status{display:none}}
+@media (min-width:880px){.tabbar{display:none} main{padding-bottom:40px} .toasts{bottom:24px}}
+@media (max-width:879px){.tabs-top{display:none}}
+@media (max-width:520px){.hero{flex-direction:column;text-align:center} .top{padding:10px 14px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand" id="brand"><div class="mark" aria-hidden="true">🛡</div>PhishGuard<span class="devtag" data-dev hidden>DEV</span></div>
+  <nav class="tabs-top" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" data-view="check" aria-selected="true" data-i18n="Check">Check</button>
+    <button class="tab" role="tab" data-view="history" aria-selected="false" data-i18n="History">History</button>
+    <button class="tab" role="tab" data-view="training" aria-selected="false" data-i18n="Training" data-dev hidden>Training</button>
+  </nav>
+  <span class="spacer"></span>
+  <button class="iconbtn" id="theme" type="button" aria-label="Theme"></button>
+  <label class="langpick" title="Language"><span aria-hidden="true">🌐</span><select id="lang" aria-label="Language" data-i18n-aria="Language"></select></label>
+  <span class="pill" id="status"><span class="dot"></span><span id="status-t">…</span></span>
+</header>
+
+<main>
+  <!-- sign-in (server with token) -->
+  <section id="view-signin" hidden>
+    <h1 class="hello" data-i18n="Sign in to PhishGuard">Sign in to PhishGuard</h1>
+    <p class="lede" data-i18n="Enter the access token you set as PHISHGUARD_TOKEN on your server. This device will stay signed in.">Enter the access token you set as PHISHGUARD_TOKEN on your server. This device will stay signed in.</p>
+    <div class="card pad">
+      <form id="signin-form" autocomplete="off">
+        <label class="fld"><span data-i18n="Access token">Access token</span><input id="signin-token" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary wide" type="submit" data-i18n="Sign in">Sign in</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- check -->
+  <section id="view-check">
+    <h1 class="hello" data-i18n="Is this message a scam?">Is this message a scam?</h1>
+    <p class="lede" data-i18n="Upload a file, scan a QR code, or paste a message or link. PhishGuard explains every warning sign it finds — before you open anything.">Upload a file, scan a QR code, or paste a message or link. PhishGuard explains every warning sign it finds — before you open anything.</p>
+    <div class="card pad" id="drop">
+      <div class="upload">
+        <label class="btn primary upload-btn" for="file"><span aria-hidden="true">📎</span> <span data-i18n="Upload file">Upload file</span></label>
+        <label class="btn upload-btn" for="qr"><span aria-hidden="true">📷</span> <span data-i18n="Scan QR code">Scan QR code</span></label>
+        <span class="note" id="drop-hint" data-i18n="Screenshots, PDF, email file (.eml), text file or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.">Screenshots, PDF, email file (.eml), text file or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.</span>
+      </div>
+      <input id="qr" type="file" accept="image/*" capture="environment" hidden>
+      <input id="file" type="file" multiple accept="image/*,.pdf,application/pdf,.eml,message/rfc822,.txt,text/plain,audio/*,.m4a,.mp3,.wav,.amr,.aac,.ogg" hidden>
+      <p class="note" id="ocr-note" style="margin-top:10px" hidden></p>
+      <div class="or" data-i18n="or paste the message">or paste the message</div>
+      <form id="text-form" autocomplete="off">
+        <div class="row" style="justify-content:space-between;margin-bottom:12px">
+          <div class="seg" role="group" aria-label="Message type" data-i18n-aria="Message type">
+            <button type="button" data-mode="sms" aria-pressed="true" data-i18n="Text">Text</button>
+            <button type="button" data-mode="email" aria-pressed="false" data-i18n="Email">Email</button>
+            <button type="button" data-mode="call" aria-pressed="false" data-i18n="Phone call">Phone call</button>
+            <button type="button" data-mode="link" aria-pressed="false" data-i18n="Link">Link</button>
+          </div>
+        </div>
+        <label class="fld" id="f-sender-row"><span data-i18n="From">From</span><input id="f-sender" dir="auto" maxlength="200" placeholder="Phone number, short code, or sender name"></label>
+        <label class="fld" id="f-subject-row" hidden><span data-i18n="Subject">Subject</span><input id="f-subject" dir="auto" maxlength="300"></label>
+        <label class="fld"><span id="f-body-label">Message</span><textarea id="f-body" dir="auto" rows="5" maxlength="5000" placeholder="Paste the full message here"></textarea></label>
+        <div class="row"><button class="btn primary" id="check-btn" type="submit" data-i18n="Check message">Check message</button><button class="btn ghost" type="button" id="clear-btn" data-i18n="Clear">Clear</button></div>
+      </form>
+      <details class="ex" style="margin-top:14px"><summary data-i18n="Try a real-world example">Try a real-world example</summary><div class="ex-list" id="examples"></div></details>
+    </div>
+
+    <div class="card" id="reading-card" hidden>
+      <div class="pad reading">
+        <img class="thumb" id="thumb" alt="Your screenshot" data-i18n-alt="Your screenshot">
+        <div class="thumb fileicon" id="fileicon" aria-hidden="true" hidden></div>
+        <div class="grow">
+          <div id="reading-status"></div>
+          <div class="readby" id="readby"></div>
+        </div>
+      </div>
+      <div id="extracted-wrap" hidden>
+        <details id="extracted" style="padding:0 16px 14px">
+          <summary class="note" style="cursor:pointer" data-i18n="What PhishGuard read — tap to fix any mistakes">What PhishGuard read — tap to fix any mistakes</summary>
+          <div style="margin-top:12px">
+            <label class="fld"><span data-i18n="From">From</span><input id="x-sender" dir="auto" maxlength="200"></label>
+            <label class="fld" id="x-subject-row" hidden><span data-i18n="Subject">Subject</span><input id="x-subject" dir="auto" maxlength="300"></label>
+            <label class="fld"><span data-i18n="Message">Message</span><textarea id="x-body" dir="auto" rows="5" maxlength="5000"></textarea></label>
+            <button class="btn sm" type="button" id="recheck" data-i18n="Check again with these corrections">Check again with these corrections</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="card" id="result-card" hidden aria-live="polite"><div id="result"></div></div>
+  </section>
+
+  <!-- history -->
+  <section id="view-history" hidden>
+    <div class="row" style="justify-content:space-between;margin:4px 2px 14px">
+      <h1 class="hello" style="margin:0" data-i18n="History">History</h1>
+      <button class="btn sm ghost" id="clear-history" data-i18n="Clear history">Clear history</button>
+    </div>
+    <div class="card"><div id="history"></div></div>
+    <p class="note" style="margin:0 4px 18px" data-i18n="Uploaded files aren't kept — only the text that was read from them.">Uploaded files aren't kept — only the text that was read from them.</p>
+    <div class="card"><div class="card-h"><div class="card-t" data-i18n="About PhishGuard">About PhishGuard</div></div><dl class="kv" id="about"></dl></div>
+    <button class="btn ghost" id="signout" hidden data-i18n="Sign out on this device">Sign out on this device</button>
+  </section>
+
+  <!-- training -->
+  <section id="view-training" hidden>
+    <h1 class="hello" data-i18n="What PhishGuard has learned">What PhishGuard has learned</h1>
+    <p class="lede" data-i18n="Every “This is a scam” teaches it the sender, links and call-back numbers. “This is safe” trusts the sender.">Every “This is a scam” teaches it the sender, links and call-back numbers. “This is safe” trusts the sender.</p>
+    <div class="card"><div class="stats" id="stats"></div></div>
+    <div class="card"><div id="training"></div></div>
+    <button class="btn ghost" id="dev-off" type="button" data-i18n="Turn off developer mode">Turn off developer mode</button>
+  </section>
+
+  <!-- developer mode (hidden from end users; opened by tapping the PhishGuard name 7 times, or #developer) -->
+  <section id="view-dev" hidden>
+    <h1 class="hello" data-i18n="Developer mode">Developer mode</h1>
+    <p class="lede" data-i18n="Developer mode shows what PhishGuard has learned and lets you remove entries. It's meant for whoever maintains this PhishGuard.">Developer mode shows what PhishGuard has learned and lets you remove entries. It's meant for whoever maintains this PhishGuard.</p>
+    <div class="card pad">
+      <form id="dev-form" autocomplete="off">
+        <label class="fld" id="dev-token-row" hidden><span data-i18n="Developer key">Developer key</span><input id="dev-token" type="password" autocomplete="off"></label>
+        <p class="note" id="dev-note" style="margin-bottom:12px"></p>
+        <div class="row"><button class="btn primary" id="dev-on" type="submit" data-i18n="Turn on developer mode">Turn on developer mode</button>
+          <button class="btn ghost" type="button" data-view="check" data-i18n="Cancel">Cancel</button></div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<nav class="tabbar" role="tablist" aria-label="Sections">
+  <button role="tab" data-view="check" aria-selected="true"><span class="ic" aria-hidden="true">🔍</span><span data-i18n="Check">Check</span></button>
+  <button role="tab" data-view="history" aria-selected="false"><span class="ic" aria-hidden="true">🕘</span><span data-i18n="History">History</span></button>
+  <button role="tab" data-view="training" aria-selected="false" data-dev hidden><span class="ic" aria-hidden="true">🧠</span><span data-i18n="Training">Training</span></button>
+</nav>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!--__SCRIPTS__-->
+<script>
+"use strict";
+const A = window.PGA;
+const I = window.PGI18N, t = I.t, tr = I.tr;
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const SEV_HEX = {critical:"#f43f5e", high:"#fb923c", medium:"#facc15", low:"#38bdf8", info:"#64748b"};
+const sevOf = n => n >= 80 ? "critical" : n >= 55 ? "high" : n >= 30 ? "medium" : n >= 10 ? "low" : "info";
+const sevPill = s => `<span class="sev ${esc(s)}">${esc(tr(s))}</span>`;
+const when = iso => { const d = new Date(iso); if (isNaN(d)) return ""; const today = new Date().toDateString() === d.toDateString();
+  const loc = I.lang === "en" ? [] : [I.lang];
+  return today ? d.toLocaleTimeString(loc, {hour: "numeric", minute: "2-digit", numberingSystem: "latn"}) : d.toLocaleDateString(loc, {month: "short", day: "numeric", numberingSystem: "latn"}); };
+const PG = {dev: false, devLogin: "unavailable", lang: "en", mode: "sms", config: null, current: null, scans: [], training: null, extracted: null, canRead: {ok: false, why: ""}};
+
+function toast(msg, err) {
+  const el = document.createElement("div"); el.className = "toast" + (err ? " err" : ""); el.textContent = msg;
+  $("toasts").appendChild(el); setTimeout(() => el.remove(), 4200);
+}
+function setStatus(ok, text) { $("status").classList.toggle("down", !ok); $("status-t").dataset.key = text; $("status-t").textContent = t(text); }
+async function call(path, opts) {
+  try { const r = await A.api(path, opts); setStatus(true, A.statusText); return r; }
+  catch (e) {
+    if (e.status === 401 && A.kind === "server") { showSignin(); }
+    else if (e.offline) setStatus(false, "Offline");
+    throw e;
+  }
+}
+
+/* ── language ── */
+const LANG_KEY = "phishguard.lang";
+const RULE_LANGS = ["en", "es", "ur", "hi", "ur-Latn", "ar", "fr", "pt"];
+function applyLanguage(code, rerender) {
+  PG.lang = I.set(code);
+  try { localStorage.setItem(LANG_KEY, PG.lang); } catch (e) {}
+  document.documentElement.lang = PG.lang; document.documentElement.dir = I.dir();
+  $("lang").value = PG.lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll("[data-i18n-aria]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
+  document.querySelectorAll("[data-i18n-alt]").forEach(el => el.setAttribute("alt", t(el.dataset.i18nAlt)));
+  $("lang").closest(".langpick").title = t("Language");
+  setMode(PG.mode); applyTheme(currentTheme());
+  if (!rerender) return;
+  setStatus(!$("status").classList.contains("down"), $("status-t").dataset.key || "");
+  renderExamples(); refreshReadiness();
+  if (PG.current && !$("result-card").hidden) showResult(PG.current, false);
+  if (!$("view-history").hidden) { loadHistory(); loadAbout(); }
+  if (!$("view-training").hidden) loadTraining();
+}
+/* ── light / dark ── */
+const THEME_KEY = "phishguard.theme", THEMES = ["auto", "light", "dark"];
+const THEME_ICON = {auto: "🌓", light: "☀️", dark: "🌙"}, THEME_NAME = {auto: "Auto (match device)", light: "Light", dark: "Dark"};
+const darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
+function currentTheme() { let v = null; try { v = localStorage.getItem(THEME_KEY); } catch (e) {} return THEMES.includes(v) ? v : "auto"; }
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", mode);
+  const btn = $("theme"), label = t("Theme: {name}", {name: t(THEME_NAME[mode])});
+  btn.textContent = THEME_ICON[mode]; btn.title = label; btn.setAttribute("aria-label", label);
+  const dark = mode === "dark" || (mode === "auto" && darkQuery && darkQuery.matches);
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = dark ? "#0b1020" : "#ffffff";
+}
+$("theme").addEventListener("click", () => {
+  const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  applyTheme(next);
+  toast(t(next === "auto" ? "Matches your device" : next === "light" ? "Light mode" : "Dark mode"));
+});
+if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener("change", () => applyTheme(currentTheme()));
+
+function initLanguage() {
+  $("lang").innerHTML = I.langs.map(l => `<option value="${esc(l.code)}" lang="${esc(l.code)}">${esc(l.name)}</option>`).join("");
+  let saved = null; try { saved = localStorage.getItem(LANG_KEY); } catch (e) {}
+  const nav = (navigator.language || "en").slice(0, 2).toLowerCase();
+  applyLanguage(saved || (I.langs.some(l => l.code === nav) ? nav : "en"), false);
+  $("lang").addEventListener("change", e => applyLanguage(e.target.value, true));
+}
+
+/* ── views ── */
+function setView(v, push = true) {
+  if (v === "training" && !PG.dev) v = "check";
+  ["signin", "check", "history", "training", "dev"].forEach(n => $("view-" + n).hidden = n !== v);
+  document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
+  if (push) try { history.replaceState(null, "", "#" + v); } catch (e) {}
+  if (v === "history") { loadHistory(); loadAbout(); }
+  if (v === "training") loadTraining();
+  if (v === "dev") showDevPanel();
+  window.scrollTo({top: 0});
+}
+function showSignin() { setView("signin", false); $("signin-token").focus(); }
+
+/* ── text check ── */
+function setMode(m) {
+  PG.mode = m;
+  document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === m));
+  $("f-subject-row").hidden = m !== "email";
+  $("f-sender-row").hidden = m === "link";
+  $("check-btn").textContent = t(m === "link" ? "Check link" : "Check message");
+  if (m === "link") {
+    $("f-body-label").textContent = t("Link, or the text of a QR code");
+    $("f-body").placeholder = t("Paste the link you want to open, e.g. https://…");
+    return;
+  }
+  $("f-sender").placeholder = t(m === "email" ? "e.g. PayPal <service@paypal.com>" : m === "call" ? "Caller's number or the name they gave"
+    : "Phone number, short code, or sender name");
+  $("f-body-label").textContent = t(m === "call" ? "What the caller said (or the voicemail transcript)" : "Message");
+  $("f-body").placeholder = t(m === "call" ? "Paste the voicemail transcript, or write down what the caller asked you to do" : "Paste the full message here");
+}
+async function runCheck(mode, sender, subject, body, btn, headers, appWarning) {
+  if (!body.trim() && !sender.trim()) { toast(t("Paste the message first"), true); $("f-body").focus(); return; }
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = t("Checking…"); }
+  try {
+    const r = await call("/api/phishguard/scan", {method: "POST", body: JSON.stringify({mode, sender, subject: mode === "email" ? subject : "", body, lang: PG.lang,
+                                                                                    ...(headers && mode === "email" ? {headers} : {}),
+                                                                                    ...(appWarning ? {app_warning: appWarning} : {})})});
+    showResult(r, true);
+  } catch (e) { if (e.status !== 401) toast(t("Couldn't check it: {msg}", {msg: t(e.message)}), true); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label; } }
+}
+
+/* ── screenshot ── */
+function readAsDataURL(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); }); }
+async function prepareImage(file) {
+  const dataUrl = await readAsDataURL(file);
+  const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = dataUrl; });
+  if (!img) return {blob: file, dataUrl, name: file.name};  // let the server try (e.g. formats this browser can't preview)
+  const longest = Math.max(img.naturalWidth, img.naturalHeight);
+  if (longest <= 2200 && file.size <= 3.5e6) return {blob: file, dataUrl, name: file.name};
+  const k = 2000 / longest, c = document.createElement("canvas");
+  c.width = Math.round(img.naturalWidth * Math.min(1, k)); c.height = Math.round(img.naturalHeight * Math.min(1, k));
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  const blob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.9));
+  return {blob: blob || file, dataUrl: c.toDataURL("image/jpeg", 0.8), name: "screenshot.jpg"};
+}
+/* ── QR codes: decoded on this device (BarcodeDetector, or jsQR loaded on first use) ── */
+const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+let jsqrLoading = null;
+function loadJsQR() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  return jsqrLoading || (jsqrLoading = new Promise((res, rej) => {
+    const sc = document.createElement("script"); sc.src = JSQR_URL; sc.async = true;
+    sc.onload = () => (window.jsQR ? res(window.jsQR) : rej(new Error("QR reader didn't load")));
+    sc.onerror = () => { jsqrLoading = null; rej(new Error("QR reader didn't load")); };
+    document.head.appendChild(sc);
+  }));
+}
+async function decodeQR(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { return null; }
+  if ("BarcodeDetector" in window) {
+    try { const hit = (await new BarcodeDetector({formats: ["qr_code"]}).detect(bmp))[0]; if (hit && hit.rawValue) return hit.rawValue; } catch (e) {}
+  }
+  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+  const g = c.getContext("2d", {willReadFrequently: true}); g.drawImage(bmp, 0, 0, c.width, c.height);
+  try {
+    const jsQR = await loadJsQR(), d = g.getImageData(0, 0, c.width, c.height);
+    const hit = jsQR(d.data, d.width, d.height, {inversionAttempts: "attemptBoth"});
+    return hit && hit.data ? hit.data : null;
+  } catch (e) { return null; }
+}
+async function onQR(file) {
+  if (!file) return;
+  $("result-card").hidden = true; $("reading-card").hidden = false; $("extracted-wrap").hidden = true;
+  $("reading-status").innerHTML = `<span class="spin"></span>${esc(t("Reading the QR code"))}…`; $("readby").textContent = "";
+  $("thumb").hidden = false; $("fileicon").hidden = true;
+  try { $("thumb").src = await readAsDataURL(file); } catch (e) {}
+  $("reading-card").scrollIntoView({behavior: "smooth", block: "start"});
+  try {
+    const text = (await decodeQR(file) || "").trim();
+    if (!text) { $("reading-status").innerHTML = `<b>${esc(t("No QR code found."))}</b> ${esc(t("Hold the camera closer so the code fills most of the photo, or upload a screenshot."))}`; return; }
+    $("reading-status").innerHTML = `<b>${esc(t("Read the QR code"))}</b>`;
+    $("readby").textContent = text.slice(0, 160);
+    PG.extracted = {mode: "link", sender: "", subject: "", body: text.slice(0, 5000), engine: "QR code", readable: true, headers: null};
+    $("x-sender").value = ""; $("x-subject").value = ""; $("x-body").value = text.slice(0, 5000); $("x-subject-row").hidden = true; $("extracted-wrap").hidden = false;
+    setMode("link"); $("f-body").value = text.slice(0, 5000);
+    await runCheck("link", "", "", text.slice(0, 5000), null);
+  } finally { $("qr").value = ""; }
+}
+const KIND_ICON = {pdf: "📄", eml: "✉️", text: "📝", audio: "🎙️"};
+function fileKind(f) {
+  const n = (f.name || "").toLowerCase(), t = f.type || "";
+  if (/^image\//.test(t) || /\.(png|jpe?g|gif|webp|heic)$/.test(n)) return "image";
+  if (t === "application/pdf" || n.endsWith(".pdf")) return "pdf";
+  if (t === "message/rfc822" || n.endsWith(".eml")) return "eml";
+  if (/^audio\//.test(t) || /\.(m4a|mp3|wav|amr|aac|ogg|opus|flac|caf|3gp)$/.test(n)) return "audio";
+  if (/^text\//.test(t) || /\.(txt|text|md)$/.test(n)) return "text";
+  return "unknown";
+}
+async function onFile(file) {
+  if (!file) return;
+  const kind = fileKind(file);
+  if (kind === "unknown") { toast(t("Use a screenshot, PDF, .eml email, text file or voicemail recording"), true); return; }
+  const sup = (PG.canRead && PG.canRead[kind]) || {ok: false};
+  const qrText = kind === "image" ? ((await decodeQR(file)) || "").trim().slice(0, 2000) : "";
+  if (!sup.ok && qrText) return onQR(file);  // can't read the text here, but the QR code can still be checked
+  if (!sup.ok) { toast(tr(sup.why) || t("That file type can't be read here"), true); return; }
+  $("result-card").hidden = true; $("reading-card").hidden = false; $("extracted-wrap").hidden = true;
+  const verb = {image: "Reading the screenshot", pdf: "Reading the PDF", eml: "Reading the email", text: "Reading the file", audio: "Transcribing the recording"}[kind];
+  $("reading-status").innerHTML = `<span class="spin"></span>${esc(t(verb))}…`; $("readby").textContent = file.name || "";
+  $("thumb").hidden = kind !== "image"; $("fileicon").hidden = kind === "image"; $("fileicon").textContent = KIND_ICON[kind] || "📄";
+  $("reading-card").scrollIntoView({behavior: "smooth", block: "start"});
+  try {
+    let blob = file, name = file.name;
+    if (kind === "image") { const p = await prepareImage(file); $("thumb").src = p.dataUrl; blob = p.blob; name = p.name; }
+    const r = await A.readFile(blob, name, kind, PG.lang, qrText);
+    setStatus(true, A.statusText);
+    showExtracted(r.extracted);
+    if (r.scan) showResult(r.scan, false);
+    else { $("reading-status").innerHTML = `<b>${esc(t("No message found."))}</b> ${esc(tr(r.extracted.notes) || t("Try another file, or paste the text instead."))}`; }
+  } catch (e) {
+    $("reading-status").innerHTML = `<b>${esc(t("Couldn't read it."))}</b> ${esc(t(e.message))}<br><span class="note">${esc(t("You can paste the text above instead."))}</span>`;
+  } finally { $("file").value = ""; }
+}
+const MAX_FILES = 5;
+function mergeExtracted(parts) {   // same rules as merge_extracted() on the server
+  const ok = parts.filter(x => x && (x.body || "").trim());
+  const info = parts.filter(x => x && ((x.body || "").trim() || x.sender || x.subject || x.headers));  // a header-only screenshot still counts
+  const pick = k => { const x = info.find(y => (y[k] || "").trim()); return x ? x[k] : ""; };
+  const modes = info.map(x => x.mode);
+  const mode = modes.includes("email") ? "email" : modes.includes("call") ? "call" : ok.length && modes.every(m => m === "link") ? "link" : "sms";
+  let bodies = [];
+  for (const x of ok) { const b = x.body.trim(); if (bodies.some(o => o.includes(b))) continue; bodies = bodies.filter(o => !b.includes(o)).concat([b]); }
+  return {mode, sender: pick("sender"), subject: pick("subject"), body: bodies.join("\n\n").slice(0, 5000),
+          headers: (info.find(x => x.headers) || {}).headers || null, engine: [...new Set(info.map(x => x.engine).filter(Boolean))].join(" + "),
+          app: pick("app"), readable: ok.length > 0, files: parts.length,
+          app_warning: (parts.find(x => x && x.app_warning) || {}).app_warning || "",
+          notes: parts.filter(x => x && !(x.body || "").trim() && x.notes).map(x => x.notes).join(" ")};
+}
+window.PGMerge = mergeExtracted;
+document.addEventListener("pg-progress", ev => {
+  const d = ev.detail || {}, st = $("reading-status");
+  if (!$("reading-card").hidden && st && st.querySelector(".spin")) st.innerHTML = `<span class="spin"></span>${esc(t(d.key, d.vars))}`;
+});
+async function onFiles(list) {
+  const files = [...(list || [])];
+  if (files.length <= 1) return onFile(files[0]);
+  if (files.length > MAX_FILES) toast(t("Using the first {n} files", {n: MAX_FILES}));
+  const pickd = files.slice(0, MAX_FILES), items = [];
+  for (const f of pickd) {
+    const kind = fileKind(f), sup = (PG.canRead && PG.canRead[kind]) || {ok: false};
+    const qr = kind === "image" ? ((await decodeQR(f)) || "").trim().slice(0, 2000) : "";
+    if (kind === "unknown" || (!sup.ok && !qr)) { toast(`${f.name}: ${tr(sup.why) || t("That file type can't be read here")}`, true); continue; }
+    items.push({file: f, kind, qr, readable: sup.ok});
+  }
+  if (!items.length) { $("file").value = ""; return; }
+  $("result-card").hidden = true; $("reading-card").hidden = false; $("extracted-wrap").hidden = true;
+  const firstImg = items.find(i => i.kind === "image");
+  $("thumb").hidden = !firstImg; $("fileicon").hidden = !!firstImg; $("fileicon").textContent = "🗂️";
+  if (firstImg) try { $("thumb").src = await readAsDataURL(firstImg.file); } catch (e) {}
+  $("readby").textContent = items.map(i => i.file.name).join(" · ");
+  $("reading-card").scrollIntoView({behavior: "smooth", block: "start"});
+  try {
+    const prepared = [];
+    for (const it of items) {
+      let blob = it.file, name = it.file.name;
+      if (it.kind === "image") { const p = await prepareImage(it.file); blob = p.blob; name = p.name; }
+      prepared.push({blob, name, kind: it.kind, qr: it.qr, readable: it.readable});
+    }
+    const r = await A.readFiles(prepared, PG.lang, (i, n) => {
+      $("reading-status").innerHTML = `<span class="spin"></span>${esc(t("Reading file {i} of {n}", {i, n}))}…`;
+    });
+    setStatus(true, A.statusText);
+    showExtracted(r.extracted);
+    if (r.scan) showResult(r.scan, false);
+    else $("reading-status").innerHTML = `<b>${esc(t("No message found."))}</b> ${esc(tr(r.extracted.notes) || t("Try another file, or paste the text instead."))}`;
+  } catch (e) {
+    $("reading-status").innerHTML = `<b>${esc(t("Couldn't read it."))}</b> ${esc(t(e.message))}<br><span class="note">${esc(t("You can paste the text above instead."))}</span>`;
+  } finally { $("file").value = ""; }
+}
+function showExtracted(x) {
+  PG.extracted = x;
+  $("reading-status").innerHTML = `<b>${esc(t(x.readable ? (x.mode === "call" ? "Transcribed the call" : "Read the file") : "Couldn't find a message"))}</b>`;
+  $("readby").textContent = (x.files > 1 ? t("{n} files combined", {n: x.files}) + " · " : "") + t("Read by {engine}", {engine: String(x.engine || "").split(" + ").map(e => tr(e)).join(" + ")}) + (x.app ? " · " + x.app : "");
+  $("x-sender").value = x.sender || ""; $("x-subject").value = x.subject || ""; $("x-body").value = x.body || "";
+  $("x-subject-row").hidden = x.mode !== "email";
+  setMode(x.mode || "sms");
+  $("extracted-wrap").hidden = !x.readable && !x.body;
+}
+
+/* ── result ── */
+function feedbackHtml(r, learned) {
+  if (r.feedback) {
+    const isScam = r.feedback === "scam";
+    const KN = {senders: "Sender", domains: "Website", phones: "Phone"};
+    const l = (learned || []).map(x => `${t(KN[x.kind] || x.kind)} ${x.value}`);
+    if (!PG.dev) return `<div class="fb-q">✓ ${esc(t(isScam ? "Saved as a scam" : "Saved as safe"))}</div>
+      <div class="fb-s">${esc(t("Thanks — this helps PhishGuard spot messages like this one."))}</div>
+      <button class="btn sm ghost" data-fb="${isScam ? "safe" : "scam"}">${esc(t(isScam ? "Change to “safe”" : "Change to “scam”"))}</button>`;
+    return `<div class="fb-q">✓ ${esc(t(isScam ? "Saved as a scam" : "Saved as safe"))}</div>
+      <div class="fb-s">${learned ? (l.length ? esc(t(isScam ? "Learned: {list}" : "Trusted sender: {list}", {list: l.join(" · ")})) : esc(t("Nothing new to learn from this one."))) : ""}
+      ${isScam ? " " + esc(t("Messages that use these will be flagged from now on.")) : ""}</div>
+      <button class="btn sm ghost" data-fb="${isScam ? "safe" : "scam"}">${esc(t(isScam ? "Change to “safe”" : "Change to “scam”"))}</button>`;
+  }
+  return `<div class="fb-q">${esc(t("Was this right?"))}</div>
+    <div class="fb-s">${esc(t("Your answer trains PhishGuard for next time."))}</div>
+    <div class="row"><button class="btn danger" data-fb="scam">⚠ ${esc(t("This is a scam"))}</button><button class="btn ok" data-fb="safe">✓ ${esc(t("This is safe"))}</button></div>`;
+}
+function showResult(r, scroll) {
+  PG.current = r;
+  const col = SEV_HEX[r.severity] || SEV_HEX.info, C = 2 * Math.PI * 44, ops = Array.isArray(r.ai) ? r.ai : [], flags = r.flags || [];
+  const ai = ops.map(o => o.score != null
+    ? `<div class="box ai"><div class="ai-h"><b>🤖 ${esc(o.provider)}</b><span class="ai-s" style="color:var(--t-${sevOf(o.score)})">${Number(o.score)}/100</span></div>
+       <div>${esc(o.reasoning)}</div></div>`
+    : `<div class="box off"><b>${esc(t("{who} unavailable.", {who: o.provider}))}</b> ${esc(o.error)}</div>`).join("");
+  const ask = A.askAI && A.aiReady && !ops.some(o => o.score != null)
+    ? `<div class="box off row" style="justify-content:space-between"><span class="note" id="ask-note">${esc(t("Want a second opinion?"))}</span>
+       <button class="btn sm" data-ask="${esc(r.id)}">${esc(t("Ask Claude"))}</button></div>` : "";
+  const ml = r.language && r.language.code !== "en" ? `<div class="msglang">🌐 ${esc(t("Message language: {lang}", {lang: tr(r.language.name)}))} · ${
+    esc(t(RULE_LANGS.includes(r.language.code) ? "checked with {lang} scam rules" : "no {lang} rules yet — links, numbers and senders were still checked", {lang: tr(r.language.name)}))}</div>` : "";
+  const line = [t("rules {n}", {n: r.heuristic_score}), ...ops.filter(o => o.score != null).map(o => `${o.provider} ${o.score}`)].join(" · ");
+  $("result").innerHTML = `
+    <div class="hero">
+      <div class="gauge" role="img" aria-label="${esc(t("Risk score {n} out of 100", {n: Number(r.score)}))}">
+        <svg width="104" height="104" viewBox="0 0 104 104"><circle cx="52" cy="52" r="44" fill="none" stroke-width="9" class="bg"/>
+        <circle id="g-fg" cx="52" cy="52" r="44" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" class="fg"/></svg>
+        <div class="gauge-n"><div><b style="color:var(--t-${r.severity})">${Number(r.score)}</b><small>/ 100</small></div></div>
+      </div>
+      <div><div class="verdict" style="color:var(--t-${r.severity})">${esc(tr(r.verdict))}</div>
+        <div class="cat">${esc(r.category ? tr(r.category) : t("No scam pattern found"))}</div>${ml}
+        <div>${sevPill(r.severity)}<span class="sub">${esc(line)}</span></div></div>
+    </div>
+    ${r.bbb ? `<div class="box bbb"><b>⚑ ${esc(t("Matches a scam confirmed by the Better Business Bureau (case #{id})", {id: r.bbb.id}))}</b><br>
+      ${esc(r.bbb.business)} · ${esc(tr(r.bbb.type))} · ${esc(t("reported {date}", {date: r.bbb.reported}))}, ${esc(r.bbb.location)}
+      <a href="${esc(r.bbb.url)}" target="_blank" rel="noopener">${esc(t("View report"))}</a></div>` : ""}
+    ${r.impersonation ? `<div class="box bbb"><b>⚑ ${esc(t("Recruiter doesn't match the company it names"))}</b><br>
+      ${t("Real {employer} email addresses end in {domains}.", {employer: esc(r.impersonation.employer), domains: `<b dir="ltr">${esc(r.impersonation.official_domains.join(", "))}</b>`})}
+      ${esc(tr(r.impersonation.note))}<br><span class="note">${esc(tr(r.impersonation.status))} · ${esc(t("added {date}", {date: r.impersonation.reported}))}</span></div>` : ""}
+    ${ai}${ask}
+    ${linksHtml(r)}
+    <div class="sec"><div class="sect">${esc(t("Why"))}</div>${flags.length ? `<ul class="flags">${flags.map(f => `<li>
+      <span class="pts" dir="ltr" style="color:${f.points < 0 ? "var(--ok-ink)" : "var(--t-" + r.severity + ")"}">${f.points > 0 ? "+" : ""}${Number(f.points)}</span>
+      <div>${esc(tr(f.text))}<span class="mod">${esc(tr(f.module))}</span></div></li>`).join("")}</ul>`
+      : `<p class="note">${esc(t("No warning signs found."))}</p>`}</div>
+    <div class="sec"><div class="sect">${esc(t("What to do"))}</div><ol class="steps">${(r.actions || []).map(a => `<li>${esc(tr(a))}</li>`).join("")}</ol></div>
+    <div class="fb" id="fb">${feedbackHtml(r)}</div>`;
+  $("result-card").hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => { const g = $("g-fg"); if (g) g.style.strokeDashoffset = C * (1 - r.score / 100); }));
+  if (scroll) $("result-card").scrollIntoView({behavior: "smooth", block: "start"});
+}
+function safeHref(u) {
+  const x = String(u || "").trim();
+  if (/^https?:\/\//i.test(x)) return x;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(x)) return "";            // javascript:, data:, upi: … are never opened from here
+  return /^[a-z0-9.-]+\.[a-z]{2,}(?:[/?#]|$)/i.test(x) ? "https://" + x : "";
+}
+function linksHtml(r) {
+  const checks = r.link_checks || [], seen = new Set();
+  const items = (r.links || []).filter(l => !seen.has(l.url) && seen.add(l.url)).slice(0, 5);
+  const pay = /(?:^|\s)(upi:\/\/pay\S*|(?:bitcoin|ethereum|litecoin|tron|usdt):\S+)/i.exec(r.body || "");
+  if (!items.length && !pay) return "";
+  const risk = r.score >= 55 ? "high" : r.score >= 30 ? "medium" : "low";  // "Don't open" leads from Suspicious up
+  const row = l => {
+    const c = checks.find(x => x.url === l.url), href = safeHref(l.url);
+    const fin = c && c.final && c.final !== l.url ? `<div class="lf">↳ ${esc(t("Really goes to {url}", {url: c.final}))}</div>` : "";
+    const age = c && c.age_days != null ? `<div class="lf">${esc(t("Website age: {n} days", {n: c.age_days}))}</div>` : "";
+    const link = (cls, label) => `<a class="btn sm ${cls}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" data-opened>${esc(label)}</a>`;
+    const btns = !href ? "" : risk !== "low"
+      ? `<div class="row"><button class="btn sm danger" type="button" data-dont>🛑 ${esc(t("Don't open"))}</button><button class="btn sm ghost" type="button" data-reveal>${esc(t("Open anyway"))}</button></div>
+         <div class="openwarn" hidden><p>${esc(t(risk === "high" ? "PhishGuard thinks this link is dangerous. Open it anyway?" : "This link has warning signs. Don't enter passwords, card numbers or codes on that page. Open it?"))}</p>
+         <div class="row">${link("danger", t("Yes, open it"))}<button class="btn sm ghost" type="button" data-hide>${esc(t("Cancel"))}</button></div></div>`
+      : `<div class="row">${link("ok", t("Open link"))}</div>`;
+    return `<li><div class="lh" dir="ltr">${esc(l.host)}</div><div class="lu" dir="ltr">${esc(l.url.length > 120 ? l.url.slice(0, 117) + "…" : l.url)}</div>${fin}${age}${btns}</li>`;
+  };
+  const payRow = pay ? `<li><div class="lh" dir="ltr">${esc(pay[1].split("?")[0])}</div><div class="lu" dir="ltr">${esc(pay[1].slice(0, 120))}</div>
+    <div class="lf">${esc(t("This is a payment request. Only approve it in your payment app if you know and trust the payee."))}</div></li>` : "";
+  return `<div class="sec"><div class="sect">${esc(t("Links"))}</div><ul class="links">${items.map(row).join("")}${payRow}</ul></div>`;
+}
+async function feedback(verdict) {
+  const r = PG.current; if (!r) return;
+  try {
+    const res = await call("/api/phishguard/feedback", {method: "POST", body: JSON.stringify({scan_id: r.id, verdict})});
+    r.feedback = verdict; $("fb").innerHTML = feedbackHtml(r, res.learned);
+    if (!PG.dev) toast(t("Thanks — saved"));
+    else toast(verdict === "scam" ? (res.learned.length === 1 ? t("Learned 1 warning sign") : t("Learned {n} warning signs", {n: res.learned.length})) : t("Sender trusted"));
+  } catch (e) { if (e.status !== 401) toast(t("Couldn't save that: {msg}", {msg: e.message}), true); }
+}
+async function askAI(id) {
+  const btn = document.querySelector(`[data-ask="${CSS.escape(id)}"]`), note = $("ask-note");
+  if (btn) { btn.disabled = true; btn.textContent = t("Thinking…"); }
+  try { const s = await A.askAI({...PG.current, ui_lang: PG.lang}); showResult(s, false); }
+  catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = t("Ask Claude"); }
+    if (note) note.textContent = t(e.message);
+  }
+}
+
+/* ── history & training ── */
+async function loadHistory() {
+  try { PG.scans = await call("/api/phishguard/scans?limit=100"); } catch (e) { return; }
+  $("history").innerHTML = PG.scans.length ? PG.scans.map(s => `<div class="list-item" data-scan="${esc(s.id)}" tabindex="0" role="button">
+      ${sevPill(s.severity)}<div class="grow"><div class="t1">${esc(s.sender || t("Unknown sender"))} · ${esc(tr(s.category || s.verdict))}</div>
+      <div class="t2" dir="auto">${esc(when(s.time))} · ${esc((s.body || "").slice(0, 90))}</div></div>
+      <span class="score">${Number(s.score)}</span></div>`).join("")
+    : `<div class="empty"><strong>${esc(t("Nothing checked yet"))}</strong>${esc(t("Your checked messages will show up here."))}</div>`;
+  $("clear-history").hidden = !PG.scans.length;
+}
+async function loadTraining() {
+  let tt; try { tt = await call("/api/phishguard/training"); } catch (e) { return; }
+  const s = tt.stats;
+  $("stats").innerHTML = [["Messages checked", s.scanned], ["Flagged as scams", s.flagged], ["Your answers", s.confirmed_scams + s.confirmed_safe], ["Warning signs learned", s.learned_iocs]]
+    .map(([l, v]) => `<div class="stat"><b>${Number(v)}</b><span>${esc(t(l))}</span></div>`).join("");
+  const kn = {senders: "Sender", domains: "Website", phones: "Phone"};
+  const row = (i, table) => `<div class="ioc"><span class="k">${esc(t(kn[i.kind] || i.kind))}</span><span class="v" dir="ltr" title="${esc(i.value)}">${esc(i.value)}</span>
+    <button class="btn sm ghost" data-rm-table="${table}" data-rm-kind="${esc(i.kind)}" data-rm-value="${esc(i.value)}">${esc(t("Forget"))}</button></div>`;
+  $("training").innerHTML = `<div class="subh">${esc(t("Scam signs you confirmed"))}</div>
+    ${tt.iocs.length ? tt.iocs.map(i => row(i, "iocs")).join("") : `<p class="note" style="padding:4px 16px 12px">${esc(t("None yet. Check a message and tap “This is a scam”."))}</p>`}
+    ${tt.allow.length ? `<div class="subh">${esc(t("Trusted senders"))}</div>${tt.allow.map(i => row(i, "allow")).join("")}` : ""}
+    <div class="subh">${esc(t("Built in"))}</div>${tt.bbb_domains.map(d => `<div class="ioc"><span class="k">${esc(t("Website"))}</span><span class="v" dir="ltr">${esc(d)}</span><span class="tag">BBB</span></div>`).join("")}
+    ${(tt.impersonation || []).map(c => c.domains.map(d => `<div class="ioc"><span class="k">${esc(t("Website"))}</span><span class="v" dir="ltr" title="${esc(t("Fake {employer} recruiter · real: {domains}", {employer: c.employer, domains: c.official.join(", ")}))}">${esc(d)}</span><span class="tag">${esc(t("FAKE RECRUITER"))}</span></div>`).join("")).join("")}`;
+}
+function loadAbout() {
+  const c = PG.config || {}, then = list => list.reduce((a, b) => t("{a}, then {b}", {a, b}));
+  const aiNames = (c.ai_providers || []).map(p => p.name);
+  const ai = aiNames.length ? aiNames.join(" + ") : t(A.kind === "device" ? (A.aiReady ? "Claude, when you ask" : "Not available here") : "Off");
+  const ocr = (c.ocr_engines || []).length ? then(c.ocr_engines.map(e => tr(e))) : t(A.kind === "device" ? "Not available here" : "Not set up");
+  const trn = (c.transcribers || []).length ? then(c.transcribers) : t(A.kind === "device" ? "Paste the transcript instead" : "Not set up");
+  const langs = ["English", "Spanish", "Urdu", "Roman Urdu / Hindi", "Hindi", "Arabic", "French", "Portuguese"].map(x => tr(x)).join(", ");
+  const lc = c.link_checks;
+  const links = lc ? [t("short links expanded"), t("website age"), ...(lc.safe_browsing ? [t("Google Safe Browsing")] : [])].join(" · ")
+    : t(A.kind === "device" ? "Offline rules on this device" : "Offline rules only");
+  $("about").innerHTML = [["Runs", tr(A.where)], ["Link checks", links], ["AI opinion", ai], ["Screenshots", ocr], ["Voicemail audio", trn], ["Message languages", langs], ["Privacy", tr(A.privacy)]]
+    .map(([k, v]) => `<dt>${esc(t(k))}</dt><dd>${esc(v)}</dd>`).join("");
+}
+
+/* ── developer mode ── */
+function applyDev(on) {
+  PG.dev = !!on;
+  document.querySelectorAll("[data-dev]").forEach(el => { el.hidden = !PG.dev; });
+  if (!PG.dev && !$("view-training").hidden) setView("check");
+}
+function showDevPanel() {
+  const mode = PG.devLogin;
+  $("dev-token-row").hidden = mode !== "token";
+  $("dev-on").hidden = mode === "unavailable";
+  $("dev-note").textContent = mode === "token" ? t("Enter the PHISHGUARD_DEV_TOKEN set on your server.")
+    : mode === "unavailable" ? t("Developer mode is only available on the computer running PhishGuard. To use it from another device, set PHISHGUARD_DEV_TOKEN.") : "";
+  $("dev-note").hidden = !$("dev-note").textContent;
+  if (mode === "token") $("dev-token").focus();
+}
+let devTaps = 0, devTimer = null;
+$("brand").addEventListener("click", () => {
+  devTaps++; clearTimeout(devTimer); devTimer = setTimeout(() => { devTaps = 0; }, 2500);
+  if (devTaps >= 7) { devTaps = 0; setView(PG.dev ? "training" : "dev"); }
+});
+$("dev-form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  try { await A.devLogin($("dev-token").value); $("dev-token").value = ""; applyDev(true); toast(t("Developer mode on")); setView("training"); }
+  catch (e) { toast(t(e.message), true); }
+});
+$("dev-off").addEventListener("click", async () => {
+  try { await A.devLogout(); } catch (e) {}
+  applyDev(false); toast(t("Developer mode off")); setView("check");
+});
+
+/* ── events ── */
+document.addEventListener("click", ev => {
+  const el = ev.target.closest("[data-view],[data-mode],[data-ex],[data-fb],[data-scan],[data-rm-value],[data-ask],[data-reveal],[data-hide],[data-dont]");
+  if (!el) return;
+  if (el.dataset.reveal !== undefined) { const w = el.closest("li").querySelector(".openwarn"); w.hidden = false; el.closest(".row").hidden = true; return; }
+  if (el.dataset.hide !== undefined) { const li = el.closest("li"); li.querySelector(".openwarn").hidden = true; li.querySelector(".row").hidden = false; return; }
+  if (el.dataset.dont !== undefined) { toast(t("Good call. You can delete the message.")); return; }
+  if (el.dataset.view) setView(el.dataset.view);
+  else if (el.dataset.mode) setMode(el.dataset.mode);
+  else if (el.dataset.ex) {
+    const e = (PG.config.examples || []).find(x => x.key === el.dataset.ex); if (!e) return;
+    setMode(e.mode); $("f-sender").value = e.sender; $("f-subject").value = e.subject || ""; $("f-body").value = e.body;
+    $("reading-card").hidden = true; runCheck(e.mode, e.sender, e.subject || "", e.body, $("check-btn"));
+  }
+  else if (el.dataset.fb) feedback(el.dataset.fb);
+  else if (el.dataset.ask) askAI(el.dataset.ask);
+  else if (el.dataset.scan) { const s = PG.scans.find(x => x.id === el.dataset.scan); if (s) { setView("check"); $("reading-card").hidden = true; showResult(s, true); } }
+  else if (el.dataset.rmValue) {
+    call("/api/phishguard/training/remove", {method: "POST", body: JSON.stringify({table: el.dataset.rmTable, kind: el.dataset.rmKind, value: el.dataset.rmValue})})
+      .then(() => { toast(t("Forgot {v}", {v: el.dataset.rmValue})); loadTraining(); }).catch(e => toast(e.message, true));
+  }
+});
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && ev.target.matches && ev.target.matches("[data-scan]")) ev.target.click();
+  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && ev.target.id === "f-body") { ev.preventDefault(); $("text-form").requestSubmit(); }
+});
+$("text-form").addEventListener("submit", ev => { ev.preventDefault(); $("reading-card").hidden = true;
+  runCheck(PG.mode, $("f-sender").value, $("f-subject").value, $("f-body").value, $("check-btn")); });
+$("clear-btn").addEventListener("click", () => { ["f-sender", "f-subject", "f-body"].forEach(id => $(id).value = ""); $("result-card").hidden = true; $("reading-card").hidden = true; });
+$("recheck").addEventListener("click", () => { const x = PG.extracted || {mode: "sms"};
+  runCheck(x.mode, $("x-sender").value, $("x-subject").value, $("x-body").value, $("recheck"), x.headers, x.app_warning); });
+$("file").addEventListener("change", ev => onFiles(ev.target.files));
+$("qr").addEventListener("change", ev => onQR(ev.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => onFiles(e.dataTransfer.files));
+document.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) onFiles(fs); });
+$("clear-history").addEventListener("click", async () => {
+  const btn = $("clear-history");
+  if (!btn.dataset.armed) {   // pop-up confirmations don't show in every browser, so ask on the button itself
+    btn.dataset.armed = "1"; btn.classList.add("danger"); btn.textContent = t("Tap again to delete all");
+    setTimeout(() => { delete btn.dataset.armed; btn.classList.remove("danger"); btn.textContent = t("Clear history"); }, 4000);
+    return;
+  }
+  delete btn.dataset.armed; btn.classList.remove("danger"); btn.textContent = t("Clear history");
+  try { await call("/api/phishguard/scans/clear", {method: "POST"}); toast(t("History cleared")); loadHistory(); } catch (e) { toast(e.message, true); }
+});
+$("signin-form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  try { await A.login($("signin-token").value); $("signin-token").value = ""; $("signout").hidden = false; await boot(); }
+  catch (e) { toast(e.message, true); }
+});
+$("signout").addEventListener("click", async () => { try { await A.logout(); } catch (e) {} showSignin(); });
+
+function refreshReadiness() {
+  const c = PG.canRead || {}, missing = Object.entries(c).filter(([, v]) => !v.ok);
+  const names = {image: "Screenshots", pdf: "PDFs", eml: "Email files", text: "Text files", audio: "Voicemail recordings"};
+  $("ocr-note").hidden = !missing.length;
+  $("ocr-note").innerHTML = missing.map(([k, v]) => `<b>${esc(t(names[k]))}:</b> ${esc(tr(v.why) || t("not available here"))}`).join("<br>");
+}
+
+function renderExamples() {
+  $("examples").innerHTML = ((PG.config && PG.config.examples) || []).map(e =>
+    `<button class="exb" type="button" data-ex="${esc(e.key)}">${esc(t(e.title))} <span class="etag ${esc(e.tag)}">${esc(e.tag)}</span></button>`).join("");
+}
+
+/* ── boot ── */
+async function boot() {
+  setStatus(true, A.statusText);
+  try {
+    const sess = await A.session();
+    if (sess.auth_required && !sess.authorized) { showSignin(); return; }
+    $("signout").hidden = !sess.auth_required;
+    PG.devLogin = sess.dev_login || "unavailable"; applyDev(sess.developer);
+    PG.config = await call("/api/phishguard/config");
+  } catch (e) {
+    if (e.status !== 401) { setStatus(false, "Offline"); toast(t("Can't reach your PhishGuard server right now"), true); }
+    return;
+  }
+  renderExamples();
+  PG.canRead = await A.canRead(PG.config); refreshReadiness();
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h.startsWith("scan=")) {
+    setView("check", false);
+    try { showResult(await call("/api/phishguard/scans/" + encodeURIComponent(h.slice(5))), true); } catch (e) {}
+    try { history.replaceState(null, "", "#check"); } catch (e) {}
+  } else if (h.startsWith("error=")) { setView("check", false); toast(h.slice(6), true); try { history.replaceState(null, "", "#check"); } catch (e) {} }
+  else if (h === "developer") setView(PG.dev ? "training" : "dev", false);
+  else setView(["history", "training"].includes(h) ? h : "check", false);
+}
+A.onChange = async () => { PG.canRead = await A.canRead(PG.config || {}); refreshReadiness(); if (PG.current) showResult(PG.current, false); };
+initLanguage();
+A.init();
+boot();
+</script>
+</body>
+</html>

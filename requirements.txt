@@ -1,0 +1,9 @@
+flask>=3.0
+requests>=2.31
+# Optional, for reading screenshots offline (also install the Tesseract program):
+# pillow>=10
+# pytesseract>=0.3
+# Optional, for reading PDFs (or install the pdftotext program):
+# pypdf>=4
+# Optional, for transcribing voicemail recordings offline (otherwise set GEMINI_API_KEY):
+# faster-whisper>=1.0

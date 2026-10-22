@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<style>
+:root{--bg:#fff;--text:#0f172a;--muted:#55627a;--line:#e2e7ef;--accent:#0f766e;--ok:#10b981;--bad:#e11d48;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#121a2e;--text:#e5ebf6;--muted:#9aa8c4;--line:#2a3756;--accent:#2dd4bf;color-scheme:dark}}
+body{margin:0;width:300px;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);font-weight:700}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok)} .dot.bad{background:var(--bad)} .dot.off{background:#94a3b8}
+dl{display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin:0;padding:14px 16px}
+dt{color:var(--muted)} dd{margin:0;font-weight:600;text-align:right}
+#err{padding:0 16px;color:var(--bad);font-size:13px}
+.row{display:flex;gap:8px;padding:12px 16px 16px}
+button{flex:1;font:600 13px system-ui,sans-serif;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+</style></head>
+<body>
+<header><span class="dot" id="dot"></span><span id="state">SOC Browser Monitor</span></header>
+<dl>
+  <dt>Sent today</dt><dd id="sent">0</dd>
+  <dt>Waiting to send</dt><dd id="queued">0</dd>
+  <dt>Last report</dt><dd id="last">—</dd>
+  <dt>Sites blocked</dt><dd id="blocked">0</dd>
+</dl>
+<div id="err"></div>
+<div class="row"><button class="primary" id="open">Open dashboard</button><button id="pause">Pause</button></div>
+<div class="row" style="padding-top:0"><button id="settings">Settings</button></div>
+<script src="popup.js"></script>
+</body></html>

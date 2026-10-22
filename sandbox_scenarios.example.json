@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {"name": "Fake bank fraud alert", "label": "scam", "mode": "sms", "sender": "(844) 555-0102",
+     "body": "Wells Fargo: Did you attempt a $950 Zelle payment? Reply YES or NO. If NO, verify at https://wellsfargo-verify-alert.com"},
+    {"name": "Friend sharing a link", "label": "safe", "mode": "sms", "sender": "(703) 555-0123",
+     "body": "lol you have to see this https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+  ],
+  "network": [
+    {"name": "SSRF to cloud metadata", "label": "malicious", "ip": "203.0.113.10", "path": "/log?url=http://169.254.169.254/latest/meta-data/"},
+    {"name": "Blog article view", "label": "benign", "ip": "192.0.2.201", "path": "/log?page=/blog/zero-trust-basics"}
+  ]
+}

@@ -1,168 +1,71 @@
-# 🛡 PhishGuard AI
+# PhishGuard and SOC Threat Dashboard
 
-**AI-powered real-time phishing, smishing, and fraud detection — built on AWS DynamoDB + Vercel**
+Two separate apps that can share what they learn.
 
-> Submission for **H01: Hack the Zero Stack with Vercel v0 & AWS Databases**
-> Track 2 — Monetizable B2B App · `#HOHackathon` · Deadline: Jun 29, 2026 @ 8:00pm EDT
-
----
-
-## What it does
-
-PhishGuard AI analyzes SMS, email, and other messages for phishing, smishing, job-recruitment scams, gift-card fraud, romance scams, and brand impersonation. It returns a 0–100 risk score, a plain-language explanation, red flags, and recommended actions — backed by a continuously-growing threat intelligence database stored in AWS DynamoDB.
-
-**Live threat database (8 confirmed patterns at launch):**
-- BBB-confirmed debt collection fraud (Harris & Harris, Case #1308291)
-- Job recruitment scams (Bergen Logistics, Sandpiper Productions, **CVS Health**)
-- Multi-TLD cloud storage phishing (iCloud impersonation, .my.id / .co.uk)
-- Gift card phishing (Aldi $500 gift card, Unicode brand spoofing)
-- Russian romance/social-engineering cluster (.ru, Match.com / Google Maps / Viber)
-- Fake health broadcast scams (CBS 60 Minutes impersonation)
-- Retail survey gift scams (Harbor Freight / Stanley cross-brand)
-
----
-
-## Architecture — "Zero Stack"
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  FRONTEND (Vercel)                                            │
-│  Next.js 14 App Router · React · Server Components           │
-│  /src/app/page.jsx — Scan / History / Settings views          │
-└───────────────┬────────────────────────────────────────────┘
-                 │ POST /api/scan
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│  API ROUTES (Vercel Serverless Functions)                     │
-│  /api/scan     → orchestrates AI + Safe Browsing + DynamoDB   │
-│  /api/history  → query scan history                           │
-│  /api/train    → write confirmed scam/safe labels             │
-│  /api/patterns → read/write threat intelligence               │
-└───────┬─────────────────┬──────────────────┬─────────────────┘
-        │                  │                  │
-        ▼                  ▼                  ▼
-┌──────────────┐  ┌─────────────────┐  ┌──────────────────────┐
-│ Anthropic API │  │ Google Safe      │  │ AWS DynamoDB          │
-│ Claude Sonnet │  │ Browsing API v4  │  │                       │
-│ (AI analysis) │  │ (URL threat DB)  │  │ phishguard-scans      │
-└──────────────┘  └─────────────────┘  │ phishguard-patterns   │
-                                         │ phishguard-training   │
-                                         └──────────────────────┘
-```
-
-### Why DynamoDB?
-
-1. **Millisecond reads** for real-time scan history — no cold-start penalty
-2. **Flexible schema** fits varied threat-pattern shapes (some have `sender_tlds`, others `reply_to`, others `must_match`) without migrations
-3. **TTL** auto-expires old scans (90 days) and training data (1 year) — zero cleanup jobs
-4. **Pay-per-request billing** — scales from 0 to millions of users with no capacity planning
-5. **Global Tables** (future) — worldwide fraud intelligence replicated across regions in near real-time
-
-### Tables
-
-| Table | Partition Key | Sort Key | Purpose |
+| | What it does | Start | Guide |
 |---|---|---|---|
-| `phishguard-scans` | `userId` | `scannedAt` | Scan history, 90-day TTL, GSI on `riskLevel` |
-| `phishguard-patterns` | `patternId` | `source` | Threat intelligence — updatable with zero deploys |
-| `phishguard-training` | `userId` | `tsHash` | User-confirmed scam/safe labels, hash-deduped |
+| `phishguard.py` | Checks texts, emails, phone calls, links and QR codes, and uploaded files (screenshots, PDFs, .eml, voicemail) for scams, in 8 languages, with results in English, Español, اردو or हिन्दी. Installable on your phone. | `python phishguard.py` → http://127.0.0.1:5001 | PHONE_SETUP.md |
+| `soc_dashboard.py` | Watches traffic to a server, and your own browser's traffic via the extension. | `python soc_dashboard.py` → http://127.0.0.1:5000 | BROWSER_SETUP.md |
+| `soc-browser-extension/` | Chrome / Edge / Brave extension that reports your browser's requests to the dashboard. | Load unpacked | BROWSER_SETUP.md |
 
----
+Install once: `pip install -r requirements.txt`
 
-## Setup
+**Connect them (optional):** start the dashboard with `PHISHGUARD_URL=http://127.0.0.1:5001`. Scam domains you
+confirm in PhishGuard are then flagged when your browser visits them.
 
-### 1. Install dependencies
-
-```bash
-npm install
-```
-
-### 2. Configure environment
+**Check everything works:** `python sandbox.py` runs both apps offline against labelled scenarios and writes
+`sandbox_report.html`. The tests in `tests/` each exit non-zero on a failure:
 
 ```bash
-cp .env.example .env.local
+python tests/test_phishguard.py          # PhishGuard server app
+python tests/test_soc_dashboard.py       # SOC dashboard
+python tests/test_combined_phishguard.py # combined app (phishguard_soc.py)
+python tests/test_combined_soc.py
+cd web && node parity.js && node parity2.js && node i18n_coverage.js   # browser engine = Python engine; every result translated
 ```
 
-Fill in:
-- `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` — IAM user with DynamoDB read/write
-- `GOOGLE_SAFE_BROWSING_KEY` — optional, from [console.cloud.google.com](https://console.cloud.google.com) (Safe Browsing API v4)
-- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` — optional, for Gmail inbox import
-- `NEXT_PUBLIC_MSAL_CLIENT_ID` — optional, for Outlook inbox import
+**Developer mode:** the Training tab (what PhishGuard has learned) is hidden from end users. Tap the PhishGuard name 7 times
+to turn developer mode on. See "Developer mode" in PHONE_SETUP.md for who is allowed to, and `PHISHGUARD_DEV_TOKEN`.
 
-### 3. Create DynamoDB tables + seed threat patterns
+## How the code is organised
+
+`phishguard.py` and `soc_dashboard.py` are single-file apps, **built** from the sources below. Edit the sources, then rebuild.
+
+| File | What it is |
+|---|---|
+| `phishguard_soc.py` | The combined app and the **source of truth for every scam rule** (brands, links, languages, vishing, email headers…). |
+| `pg_head.py`, `pg_tail.py` | The PhishGuard server around the rules: file uploads, screenshot reading, live link checks, developer mode, access control. |
+| `soc_dashboard_v3.py`, `soc_browser_backend.py` | The SOC dashboard and its browser-monitoring backend. |
+| `web/engine.js` | The rules ported to JavaScript for the phone version (kept identical by `parity.js` / `parity2.js`). |
+| `web/phishguard_ui.html` | The app's interface, shared by the server and phone versions. |
+| `web/i18n_data.py` → `web/i18n.js` | Every translation (Español, اردو, हिन्दी). |
+| `web/filetext.js` | Reads PDFs, .eml files and (without Claude) screenshots in the browser. |
+| `web/phishguard_app.html` | The built phone version (published as a Claude artifact). |
+
+Rebuild after changing anything:
 
 ```bash
-npm run setup-db
+cd web
+python export_data.py   # rule data + reference results for the JS engine
+python i18n_data.py     # translations
+python build_pg.py      # → ../phishguard.py and phishguard_app.html
+python build_soc.py     # → ../soc_dashboard.py
+python build.py         # → phishguard_soc.html (live SOC demo)
+./fetch_ocr.sh          # once: the on-device screenshot reader for the phone version (web/ocr/)
 ```
 
-This creates all 3 tables (pay-per-request, TTL enabled) and seeds the 8 confirmed threat patterns.
+When publishing `phishguard_app.html`, publish the files in `web/ocr/` next to it as `ocr/…`.
 
-### 4. Run locally
+## Phone version on Vercel
 
-```bash
-npm run dev
-```
+Connected to Vercel, this repo deploys the phone version (`web/phishguard_app.html`) as a static site:
+`vercel.json` runs `web/vercel_build.sh`, which copies the page to `public/index.html` and downloads the on-device
+screenshot reader into `public/ocr/`. Everything runs in the visitor's browser; nothing is sent to a server.
+For the full server app (AI opinions, voicemail transcription, live link checks), run `python phishguard.py`
+(see PHONE_SETUP.md).
 
-Open [http://localhost:3000](http://localhost:3000)
+## History
 
-### 5. Deploy to Vercel
-
-```bash
-npm i -g vercel
-vercel --prod
-```
-
-Then add all environment variables from `.env.local` into **Vercel Dashboard → Project → Settings → Environment Variables**.
-
----
-
-## API Reference
-
-### `POST /api/scan`
-```json
-{
-  "sender": "ednacvshealth@gmail.com",
-  "subject": "HIRING NOW",
-  "message": "...",
-  "mode": "email",
-  "userId": "public"
-}
-```
-Returns risk assessment (`risk_level`, `score`, `red_flags`, `recommended_actions`, etc.) and persists to `phishguard-scans`.
-
-### `GET /api/history?userId=public&limit=50&risk=CRITICAL`
-Returns scan history from DynamoDB, optionally filtered by risk level.
-
-### `POST /api/train`
-```json
-{ "userId": "public", "sender": "...", "body": "...", "type": "...", "risk": "CRITICAL", "label": "scam" }
-```
-Saves a confirmed scam/safe example to `phishguard-training` with hash-based deduplication.
-
-### `GET /api/patterns`
-Returns all threat patterns (DynamoDB-backed, falls back to static list).
-
----
-
-## H01 Hackathon Submission Checklist
-
-- [x] Full-stack application — Next.js frontend + serverless API routes
-- [x] AWS Database — **DynamoDB** (3 tables: scans, patterns, training)
-- [x] Deployed on Vercel
-- [x] Track 2: Monetizable B2B App (fraud detection for SMBs, MSPs, IT helpdesks)
-- [x] Architecture diagram (above)
-- [ ] Published Vercel Project Link & Vercel Team ID
-- [ ] Demo video (<3 min, YouTube preferred)
-- [ ] Storage Configuration screenshots (DynamoDB tables in AWS Console)
-- [ ] Bonus: blog/LinkedIn post tagged `#HOHackathon`
-
----
-
-## Tech Stack
-
-- **Frontend:** Next.js 14 (App Router), React 18
-- **Backend:** Vercel Serverless Functions (Node.js)
-- **Database:** AWS DynamoDB (`@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`)
-- **AI:** Anthropic Claude Sonnet 4 (`@anthropic-ai/sdk`)
-- **Threat Intel:** Google Safe Browsing API v4
-- **Auth (optional):** Google OAuth (Gmail), MSAL.js (Outlook/Microsoft Graph)
+This repository started as **PhishGuard AI**, a Next.js + AWS DynamoDB app built for the H01 "Hack the Zero Stack"
+hackathon (June 2026). That version was replaced by this one in October 2026; its code is still in the git history
+(last commit `a2786d9`, e.g. `git checkout a2786d9`).

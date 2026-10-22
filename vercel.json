@@ -1,0 +1,12 @@
+{
+  "framework": null,
+  "installCommand": "echo 'no dependencies to install'",
+  "buildCommand": "bash web/vercel_build.sh",
+  "outputDirectory": "public",
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Referrer-Policy", "value": "no-referrer" }
+    ] }
+  ]
+}
