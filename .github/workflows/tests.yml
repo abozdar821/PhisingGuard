@@ -1,19 +1,14 @@
-# Runs the PhishGuard app's tests (phishguard-app/) whenever it changes.
+# Runs PhishGuard's tests on every push and pull request.
 name: PhishGuard app tests
 
 on:
   push:
     branches: [ "main" ]
-    paths: [ "phishguard-app/**", ".github/workflows/phishguard-app.yml" ]
   pull_request:
-    paths: [ "phishguard-app/**", ".github/workflows/phishguard-app.yml" ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: phishguard-app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,5 +30,5 @@ jobs:
       - name: Sandbox (labelled scenarios, offline)
         run: python sandbox.py --scenarios sandbox_scenarios.example.json --out "$RUNNER_TEMP/sandbox"
       - name: Phone version engine matches the Python engine, and every result is translated
-        working-directory: phishguard-app/web
+        working-directory: web
         run: node parity.js && node parity2.js && node i18n_coverage.js
