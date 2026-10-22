@@ -56,6 +56,14 @@ python build.py         # → phishguard_soc.html (live SOC demo)
 
 When publishing `phishguard_app.html`, publish the files in `web/ocr/` next to it as `ocr/…`.
 
+## Phone version on Vercel
+
+Connected to Vercel, this repo deploys the phone version (`web/phishguard_app.html`) as a static site:
+`vercel.json` runs `web/vercel_build.sh`, which copies the page to `public/index.html` and downloads the on-device
+screenshot reader into `public/ocr/`. Everything runs in the visitor's browser; nothing is sent to a server.
+For the full server app (AI opinions, voicemail transcription, live link checks), run `python phishguard.py`
+(see PHONE_SETUP.md).
+
 ## History
 
 This repository started as **PhishGuard AI**, a Next.js + AWS DynamoDB app built for the H01 "Hack the Zero Stack"

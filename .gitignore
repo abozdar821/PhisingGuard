@@ -10,3 +10,6 @@ sandbox_report.html
 sandbox_results.json
 # the on-device screenshot reader: download with web/fetch_ocr.sh
 web/ocr/
+
+# Vercel build output (web/vercel_build.sh)
+public/
