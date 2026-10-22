@@ -40,6 +40,7 @@ import json
 import os
 import re
 import threading
+import unicodedata
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
@@ -783,7 +784,7 @@ PG_ADULT = ["naughty", "sexy", "steamy", "wild side", "lonely tonight", "bored t
 PG_GREETINGS = ["dear customer", "dear user", "valued customer", "dear member", "dear applicant", "dear account holder"]
 PG_BRANDS = {
     "paypal": ["paypal.com"], "apple": ["apple.com", "icloud.com"], "amazon": ["amazon.com"],
-    "microsoft": ["microsoft.com", "outlook.com", "live.com"], "google": ["google.com"],
+    "microsoft": ["microsoft.com", "outlook.com", "live.com"], "google": ["google.com", "googleapis.com", "googleusercontent.com"],
     "chase": ["chase.com"], "bank of america": ["bankofamerica.com"], "wells fargo": ["wellsfargo.com"],
     "irs": ["irs.gov"], "usps": ["usps.com"], "fedex": ["fedex.com"], "ups": ["ups.com"],
     "netflix": ["netflix.com"], "social security": ["ssa.gov"], "verizon": ["verizon.com"],
@@ -800,6 +801,27 @@ def _brand(b: str) -> str:
     return PG_BRAND_NAMES.get(b, b.title())
 
 
+_STYLED_RE = re.compile("[\U0001d400-\U0001d7ff]")
+
+
+def fold_styled(text: str) -> str:
+    """𝗣𝗮𝘆𝗺𝗲𝗻𝘁 / 𝙿𝚊𝚢 / ｐａｙ / ﬁ → plain letters, so the rules can read text written in 'fancy' fonts."""
+    return "".join(unicodedata.normalize("NFKC", ch) if "\U0001d400" <= ch <= "\U0001d7ff" or "\ufb00" <= ch <= "\ufb06"
+                   or "\uff01" <= ch <= "\uff5e" else ch for ch in text or "")
+
+
+def random_label(host: str) -> str:
+    """A machine-made name such as '66vp8yv57rw7q1' or 'ycmoggbfves' in a web or email address ('' if none)."""
+    for lb in host.lower().split(".")[:-1]:
+        if len(lb) < 10 or "-" in lb:
+            continue
+        if re.search(r"[a-z]\d+[a-z]", lb) and sum(c.isdigit() for c in lb) >= 2:
+            return lb
+        if lb.isalpha() and sum(c in "aeiou" for c in lb) / len(lb) < 0.2:
+            return lb
+    return ""
+
+
 PG_LOOKALIKES = ["paypa1", "g00gle", "arnazon", "amaz0n", "micros0ft", "rnicrosoft", "app1e",
                  "faceb00k", "netf1ix", "chasebank-secure", "bankofamerica-secure"]
 PG_SHORTENERS = {"bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "rb.gy", "cutt.ly",
@@ -810,6 +832,14 @@ PG_FREE_HOSTS = ["weebly.com", "wixsite.com", "webflow.io", "pages.dev", "worker
                  "square.site", "godaddysites.com", "sites.google.com", "forms.gle", "docs.google.com", "ipfs.io",
                  "dweb.link", "herokuapp.com", "repl.co", "surge.sh", "framer.app", "carrd.co", "notion.site",
                  "translate.goog", "duckdns.org", "ngrok.io", "ngrok-free.app", "trycloudflare.com"]
+# Cloud-storage buckets: anyone can upload a single .html page there and email the link.
+PG_BUCKET_HOSTS = ["storage.googleapis.com", "firebasestorage.googleapis.com", "storage.cloud.google.com", "blob.core.windows.net",
+                   "web.core.windows.net", "s3.amazonaws.com", "digitaloceanspaces.com", "r2.dev"]
+# Cheap or free sub-domain registries that bulk spammers sign up for anonymously.
+PG_FREE_SUBDOMAINS = ["my.id", "web.id", "biz.id", "us.kg", "eu.org", "pp.ua", "ddns.net", "duckdns.org"]
+PG_FREE_HOSTS += [h for h in PG_BUCKET_HOSTS + PG_FREE_SUBDOMAINS if h not in PG_FREE_HOSTS]
+# Brands matched only when the sender's whole display name is the brand ("Messenger"), since the word is common.
+PG_DISPLAY_BRANDS = {"messenger": ["facebook.com", "facebookmail.com", "messenger.com", "fb.com", "meta.com"]}
 # Words that, stitched together in a website name, are typical of fake banking / delivery / support sites.
 PG_SCAM_WORDS = ["secure", "login", "signin", "verify", "verification", "account", "update", "support", "service",
                  "billing", "refund", "parcel", "delivery", "redeliver", "track", "tracking", "toll", "unpaid", "customs",
@@ -1136,7 +1166,7 @@ def _debt_module(body_l: str, body: str, links: list[dict]):
     return sc, fl
 
 
-def _sender_module(sn: dict, mode: str):
+def _sender_module(sn: dict, mode: str, styled_name: bool = False):
     sc, fl = 0, []
     def add(p, t):
         nonlocal sc
@@ -1150,12 +1180,23 @@ def _sender_module(sn: dict, mode: str):
     if sn["kind"] == "email":
         dom, hay = sn["domain"], (sn["display"] + " " + sn["value"].split("@")[0]).lower()
         squashed = re.sub(r"[^a-z]", "", sn["display"].lower())  # "🟢Whats App" → "whatsapp"
+        claimed = False
         for brand, legit in PG_BRANDS.items():
             named = re.search(r"(?<![a-z])" + re.escape(brand) + r"(?![a-z])", hay) \
                 or (len(brand.replace(" ", "")) >= 6 and brand.replace(" ", "").replace("-", "") in squashed)
             if named and not any(dom == l or dom.endswith("." + l) for l in legit):
                 add(40, f"Claims to be {_brand(brand)} but sends from {dom}")
+                claimed = True
                 break
+        for brand, legit in PG_DISPLAY_BRANDS.items():
+            if not claimed and squashed in (brand, "facebook" + brand, "meta" + brand) \
+                    and not any(dom == l or dom.endswith("." + l) for l in legit):
+                add(40, f"Claims to be {_brand(brand)} but sends from {dom}")
+        if styled_name: add(20, "Sender name is written in fancy look-alike letters (like 𝗣aym𝗲nt) to slip past spam filters")
+        free_sub = _host_in(dom, PG_FREE_SUBDOMAINS)
+        if free_sub: add(15, f"Sends from a cheap sub-domain service (.{free_sub}) that anyone can sign up for anonymously")
+        rnd = random_label(dom)
+        if rnd: add(10, f"Sender's domain contains a random, machine-made name ({rnd}), typical of throw-away spam domains")
         if any(t in dom for t in PG_LOOKALIKES): add(25, f"Look-alike sender domain: {dom}")
         if dom.rsplit(".", 1)[-1] in PG_BAD_TLDS: add(15, f"High-abuse domain ending: .{dom.rsplit('.', 1)[-1]}")
         if len(dom) > 40: add(10, "Unusually long sender domain")
@@ -1164,19 +1205,25 @@ def _sender_module(sn: dict, mode: str):
     return sc, fl
 
 
+_ROMANCE_RE = re.compile(r"(?:near you|nearby|in your area|around you)\b[^.!?\n]{0,60}\b(?:wants? to|chat|meet|connect|reach you)|"
+                         r"wants? to (?:chat|meet you|get to know you|reach you)|you seem (?:familiar|nice|interesting)|"
+                         r"i (?:think i )?saw your (?:profile|photo|comment|picture)")
 _NOTIFY_RE = re.compile(r"request for correspondence|correspondence request|sent you a (?:private )?(?:message|request|document|file|voice ?note)"
                         r"|you have (?:\d+ )?(?:new |unread |pending |undelivered |missed )+(?:messages?|requests?|documents?|voicemails?|voice notes?)"
                         r"|(?:message|request|document|voicemail)s? (?:is |are )?(?:waiting|pending|on hold) for you|messages? (?:could not|couldn't) be delivered")
 
 
-def _content_module(text_l: str, subject: str, mode: str):
+def _content_module(text_l: str, subject: str, mode: str, styled_text: bool = False):
     sc, fl = 0, []
     def add(p, t):
         nonlocal sc
         sc += p
         fl.append((p, t))
-    urg = _has(text_l, PG_URGENCY)
+    urg = _has(re.sub(r"(?:nobel|pulitzer) prize", " ", text_l), PG_URGENCY)
     if urg: add(min(len(urg) * 4, 20), f"Urgency / pressure words: {', '.join(urg[:4])}")
+    if styled_text and mode in ("sms", "email"): add(15, "Uses fancy look-alike letters in the text to slip past spam filters")
+    if mode in ("sms", "email") and _ROMANCE_RE.search(text_l):
+        add(20, "Romance / dating bait: a stranger \"nearby\" who wants to chat")
     if mode == "sms" and re.search(r"\b(?:reply|text|send)\s+stop\b", text_l): add(10, "\"Reply STOP\" — automated bulk text")
     user = re.search(r"(?:^|\n|dear\s+|hi\s+|hello\s+|name:\s*)([a-z][a-z0-9]*\d[a-z0-9]*(?:[._][a-z0-9]+)+)(?=[\s,:]|$)", text_l)
     if user and mode in ("sms", "email"):
@@ -1187,7 +1234,7 @@ def _content_module(text_l: str, subject: str, mode: str):
     fin = _has(text_l, PG_FINANCIAL)
     if len(fin) >= 2: add(15, f"Money-related lures: {', '.join(fin[:3])}")
     ins = _has(text_l, PG_INSURANCE)
-    if len(ins) >= 2: add(18, f"Unsolicited insurance offer: {', '.join(ins[:3])}")
+    if len(ins) >= 2 and re.search(r"\bquotes?\b|\bsave\b|\bsavings\b|\bpremiums?\b|\bqualify\b|\brates?\b|\bcompare\b", text_l): add(18, f"Unsolicited insurance offer: {', '.join(ins[:3])}")
     ad = _has(text_l, PG_ADULT)
     if ad: add(30, f"Adult / romance bait: {', '.join(ad[:3])}")
     if _has(text_l, PG_GREETINGS): add(10, "Generic greeting instead of your name")
@@ -1228,10 +1275,24 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
     if re.search(r"\b(?:direct deposit|payroll|bank(?:ing)? (?:details|information|info)|account details)\b", text_l) \
             and re.search(r"\b(?:update|change|confirm|verify|send|reply)\b", text_l) and not links:
         add(25, "Asks to update or confirm bank / direct-deposit details by message (payroll diversion)", "payroll")
-    if re.search(r"payment (?:attempt )?(?:has )?(?:failed|failure|declined|was declined|could not be processed)|unable to (?:process|renew|charge)|failed to renew|(?:subscription|membership|account) (?:has )?(?:expired|been (?:cancell?ed|suspended|terminated|removed))|will be (?:removed|deleted|terminated|suspended|cancell?ed)", text_l) and re.search(r"update (?:my |your )?(?:payment|billing|card)|renew|re-?activate|payment (?:details|information|method)|billing (?:details|information)|click (?:on )?the link|click below", text_l):
+    if re.search(r"payment (?:attempt )?(?:has )?(?:failed|failure|declined|was declined|could not be processed)|unable to (?:process|renew|charge)|failed to renew|(?:payment method|card) (?:on file )?(?:has )?expired|issue while attempting to (?:renew|charge|process)|(?:subscription|membership|account) (?:has )?(?:expired|been (?:cancell?ed|suspended|terminated|removed))|will be (?:removed|deleted|terminated|suspended|cancell?ed)", text_l) and re.search(r"update (?:my |your )?(?:payment|billing|card)|renew|re-?activate|payment (?:details|information|method)|billing (?:details|information)|click (?:on )?the link|click below", text_l):
         add(20, "Says a payment or subscription failed and pushes you to re-enter card details", "billing")
         if links or re.search(r"\btoday\b|immediately|within \d+ ?h|will be (?:removed|deleted)|click", text_l):
             add(10, "Rushes you to fix the payment through the message itself", "billing")
+    if re.search(r"storage (?:is )?(?:almost |nearly )?full|\d{2,3}\s?% (?:of (?:your )?)?storage|out of (?:storage|space)|free up (?:space|storage)|"
+                 r"(?:photos|videos|files|emails?|data)(?: and (?:photos|videos|files|emails?|data))? (?:will|may|could) be (?:permanently )?(?:deleted|removed|lost|erased)", text_l) \
+            and re.search(r"\b(?:cloud|storage|icloud|drive|photos|upgrade)\b", text_l):
+        add(25, "Storage-full / \"your files will be deleted\" scare, a common fake cloud-storage email", "billing")
+    if re.search(r"expires? in \d+ (?:minutes?|mins?|hours?|seconds?)|\d+ (?:minutes?|mins?) (?:left|remaining)", text_l):
+        add(10, "Fake countdown timer to rush you", "countdown")
+    health = re.search(r"\b(?:reverse[sd]?|cure[sd]?|eliminate[sd]?|restore[sd]?|melts? away|rejuvenat\w*)\b[^.!?]{0,80}\b(?:vision|eyesight|cataracts?|glaucoma|"
+                       r"diabetes|blood sugar|neuropathy|tinnitus|hearing loss|joint pain|arthritis|belly fat|dementia|memory loss|hair loss|blood pressure|eye cells)\b"
+                       r"|\b(?:simple|weird|strange|\d+-second|morning|bedtime|kitchen|home) (?:trick|protocol|ritual|hack|remedy|method)\b", text_l)
+    if health:
+        add(25, "Miracle health-cure claim (a 'simple trick' that reverses an illness), typical of supplement scams", "health")
+        if re.search(r"\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b"
+                     r"|doctors? (?:hate|don'?t want you)|big pharma", text_l):
+            add(10, "Borrows a famous university or TV network's name to look credible", "health")
     if links and re.search(r"did you (?:attempt|make|authori[sz]e)", text_l) and re.search(r"reply (?:yes|no|y|n)\b", text_l):
         add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert")
     return sc, fl, kinds
@@ -1530,6 +1591,11 @@ def _header_module(sn: dict, headers: dict | None):
     if from_dom and rt_dom and rt_dom != from_dom:
         add(30 if rt_dom in FREEMAIL else 20, f"Replies would go to {'a personal ' + rt_dom + ' address' if rt_dom in FREEMAIL else rt_dom}, "
                                               f"not the sender's {from_dom}")
+    _, to_addr = parseaddr(str(headers.get("to") or ""))
+    if "@" in to_addr and sn["kind"] == "email":
+        to_user, to_dom = to_addr.lower().rsplit("@", 1)
+        if len(to_user) >= 4 and to_user in sn["value"].split("@")[0] and _registered_domain(to_dom) != from_dom:
+            add(25, "The sender's address is built from your own email name, a trick bulk spammers use to look personal")
     auth = str(headers.get("auth") or "").lower()
     failed = [k.upper() for k in ("spf", "dkim", "dmarc") if re.search(rf"\b{k}=(?:fail|softfail|permerror)\b", auth)]
     if failed:
@@ -1542,7 +1608,7 @@ def _host_in(host: str, suffixes) -> str:
     return next((h for h in suffixes if host == h or host.endswith("." + h)), "")
 
 
-def _link_module(links: list[dict], mode: str, body_l: str):
+def _link_module(links: list[dict], mode: str, body_l: str, sender_dom: str = ""):
     sc, fl, kinds = 0, [], set()
     def add(p, t, kind=None):
         nonlocal sc
@@ -1562,6 +1628,8 @@ def _link_module(links: list[dict], mode: str, body_l: str):
     if mode == "sms": add(10, f"Contains {len(links)} link(s) — unsolicited texts rarely need one")
     with _lock:
         blocked = set(BLOCKLIST)
+    own_site = _registered_domain(sender_dom) if sender_dom else ""
+    long_link, rnd_host = False, ""
     for ln in links[:6]:
         host, dom, url = ln["host"], ln["domain"], ln["url"]
         url_l = url.lower()
@@ -1607,6 +1675,10 @@ def _link_module(links: list[dict], mode: str, body_l: str):
             own = {b for b, legit in PG_BRANDS.items() if dom in legit}  # docs.google.com is Google's own site
             if any(b.replace(" ", "") in (host + path).replace("-", "") for b in PG_BRANDS if b not in own) or _PATH_LOGIN_RE.search(path):
                 add(15, "Free-hosted page posing as a sign-in or brand page")
+            if _host_in(host, PG_BUCKET_HOSTS) and re.search(r"\.html?$", path.split("?", 1)[0].split("#", 1)[0]):
+                add(15, "Opens a lone web page stored in a cloud-storage bucket, a free, throw-away way to host scam pages")
+        if not trusted and not rnd_host and random_label(host):
+            rnd_host = host
         if not trusted and dom not in PG_CRYPTO_OFFICIAL and any(w in host + url_l.split(host, 1)[-1] for w in PG_CRYPTO_WORDS):
             add(35, f"Crypto airdrop / wallet-connect page, a common way to empty wallets: {host}", "crypto")
         if not trusted and not free:
@@ -1633,8 +1705,10 @@ def _link_module(links: list[dict], mode: str, body_l: str):
                     sc += s2
                     fl.extend(f2)
                     kinds |= k2
-        if len(url) > 200 or len(re.findall(r"%[0-9a-f]{2}", url_l)) >= 6:
-            add(10, "Link is unusually long or disguised with encoded characters")
+        if (len(url) > 200 or len(re.findall(r"%[0-9a-f]{2}", url_l)) >= 6) and dom != own_site:
+            long_link = True
+    if rnd_host: add(10, f"Link uses a random, machine-made web address: {rnd_host}")
+    if long_link: add(10, "Link is unusually long or disguised with encoded characters")
     return sc, fl, kinds
 
 
@@ -1681,6 +1755,11 @@ PG_ACTIONS["Billing / subscription scam"] = [
     "Don't use the link or button in the message. Sign in through the company's official app, or type its address yourself.",
     "Real services show payment problems inside your account, so check there.",
     "If you already entered card details, call your bank to block the card."]
+PG_ACTIONS["Health / miracle-cure spam"] = [
+    "Don't click: these links lead to fake news pages that sell pills or supplements.",
+    "Real medical breakthroughs aren't announced in surprise emails. Ask your doctor instead.",
+    "Never enter card details there. These sites often sign you up for hidden repeat charges.",
+    "Mark it as spam and delete it."]
 PG_ACTIONS["Known dangerous link"] = [
     "Don't open it: Google Safe Browsing lists this exact address as dangerous.",
     "If you already opened it and typed a password or card number, change that password and call your bank now.",
@@ -1828,6 +1907,10 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
     mode = mode if mode in ("email", "call", "link") else "sms"
     if mode != "email":
         headers = None
+    raw_sender, raw_subject, raw_body = sender, subject, body
+    styled_name = bool(_STYLED_RE.search(parseaddr(sender)[0] if "@" in sender else sender))
+    styled_text = bool(_STYLED_RE.search(subject + body))
+    sender, subject, body = fold_styled(sender), fold_styled(subject), fold_styled(body)
     sn = normalize_sender(sender)
     links = extract_links(body + " " + (subject if mode == "email" else ""))
     intel = PG_LINK_INTEL(links, mode) if PG_LINK_INTEL and links else None
@@ -1873,9 +1956,9 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         hard = True  # a known look-alike domain is evidence, like a BBB match
     job = take("Job-scam detector", _job_module(body_l, sn))
     debt = take("Debt-fraud detector", _debt_module(body_l, body, links))
-    sender_sc = take("Sender analysis", _sender_module(sn, mode))
-    take("Content analysis", _content_module(text_l, subject, mode))
-    link_sc, link_fl, lkinds = _link_module(links, mode, body_l)
+    sender_sc = take("Sender analysis", _sender_module(sn, mode, styled_name))
+    take("Content analysis", _content_module(text_l, subject, mode, styled_text))
+    link_sc, link_fl, lkinds = _link_module(links, mode, body_l, sn["domain"])
     take("Link analysis", (link_sc, link_fl))
     lure_sc, lure_fl, kinds = _lure_module(text_l, links, phones)
     take("Lure detector", (lure_sc, lure_fl))
@@ -1933,6 +2016,8 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Investment scam (pig-butchering)"
     elif "billing" in kinds and lure_sc >= 30:
         category = "Billing / subscription scam"
+    elif "health" in kinds and lure_sc >= 25:
+        category = "Health / miracle-cure spam"
     elif "callback" in kinds:
         category = "Callback phishing"
     elif ("toll" in kinds and lure_sc >= 40) or ("toll" in lkinds and score >= 40):
@@ -1941,7 +2026,7 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Brand impersonation phishing"
     elif any("insurance" in f["text"] for f in flags) and score >= 30:
         category = "Insurance marketing spam"
-    elif any("Adult" in f["text"] for f in flags):
+    elif any("Adult" in f["text"] or "Romance" in f["text"] for f in flags):
         category = "Adult / romance spam"
     elif learned:
         category = "Previously confirmed scam"
@@ -1955,8 +2040,8 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
     with _lock:
         pg_counters["scanned"] += 1
         scan_id = f"pg-{_next_id('scan')}"
-    scan = {"id": scan_id, "time": _now_iso(), "mode": mode, "sender": sender[:200], "subject": subject[:300],
-            "body": body[:5000], "sender_norm": sn, "links": links, "phones": phones,
+    scan = {"id": scan_id, "time": _now_iso(), "mode": mode, "sender": raw_sender[:200], "subject": raw_subject[:300],
+            "body": raw_body[:5000], "sender_norm": sn, "links": links, "phones": phones,
             "heuristic_score": score, "modules": modules, "category": category,
             "flags": sorted(flags, key=lambda f: -f["points"]),
             "bbb": {k: bbb[k] for k in ("id", "type", "business", "reported", "location", "url", "note")} if bbb else None,

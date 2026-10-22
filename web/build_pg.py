@@ -168,9 +168,9 @@ window.PGA = {
            readable: raw.readable !== false, notes: String(raw.notes || "").slice(0, 300),
            headers: String(raw.reply_to || "").includes("@") ? {reply_to: String(raw.reply_to).slice(0, 200)} : null};
     } else if (kind === "pdf") {
-      const text = await FileText.pdfText(await blob.arrayBuffer());
-      if (text.replace(/\\s/g, "").length < 20) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
-      x = {engine: "PDF text", app: "PDF", ...FileText.parsePlain(text)};
+      const read = await FileText.pdfRead(await blob.arrayBuffer());
+      if (read.text.replace(/\\s/g, "").length < 20) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
+      x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
     } else {
       const raw = await blob.text();
       x = kind === "eml" || FileText.looksLikeEml(raw) ? {engine: "Email file", app: "Email file (.eml)", ...FileText.parseEml(raw)}

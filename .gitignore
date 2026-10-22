@@ -13,3 +13,4 @@ web/ocr/
 
 # Vercel build output (web/vercel_build.sh)
 public/
+node_modules/

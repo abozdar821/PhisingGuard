@@ -377,4 +377,38 @@ check("offline reader understands Gmail's From • address / Reply-to layout and
       o["sender"].endswith("<yoalbl@bilfohau.my>") and o["headers"] == {"reply_to": "onimtmxgyj@rambler.ru"}
       and o["subject"] == "You have been sent a request for correspondence" and o["app_warning"], o)
 print(f"\n{len(fails)} failures (after multi-file checks)", fails)
+
+# ── PDFs printed from Gmail: ligatures, fancy letters, wrapped subject/address, hidden button links ──
+if have_pdf:
+    import shutil as _sh
+    real_which = _sh.which
+    paths = [("pdftotext", real_which)] if real_which("pdftotext") else []
+    try:
+        import pypdf  # noqa: F401
+        paths.append(("pypdf only", lambda name: None))
+    except ImportError:
+        pass
+    for label, which in paths:
+        with mock.patch.object(_sh, "which", which):
+            j = fup("gmail_cloud_scam.pdf").json
+            x, s = j["extracted"], j["scan"]
+            check(f"Gmail PDF [{label}]: fancy-letter sender kept whole", x["sender"] == "𝗣aym𝗲nt_Declin𝗲d <jlee4817.mail.5804@ycmoggbfves.event-manager.hiartomaro.my.id>", x["sender"])
+            check(f"Gmail PDF [{label}]: wrapped subject read in full", x["subject"].startswith("jlee4817.mail, Your Cloud Account has been locked on 10-20-2026.") and "removed!" in x["subject"], x["subject"])
+            check(f"Gmail PDF [{label}]: recipient captured from To:", (x["headers"] or {}).get("to") == "jlee4817.mail@gmail.com", x["headers"])
+            check(f"Gmail PDF [{label}]: ligatures undone (ﬁ → fi)", "files are safe" in x["body"] and "official website" in x["body"] and "ﬁ" not in x["body"], x["body"][:300])
+            check(f"Gmail PDF [{label}]: link hidden behind the button is added", "Links in this email:\nhttps://storage.googleapis.com/betweenthemiseasy/trustedbycommunities.html" in x["body"], x["body"][-300:])
+            check(f"Gmail PDF [{label}]: date not mistaken for the body", not x["body"].lstrip().startswith(("Tue", "19:46")), x["body"][:80])
+            check(f"Gmail PDF [{label}]: fake cloud storage email → Likely scam, billing", s["score"] >= 55 and s["category"] == "Billing / subscription scam", (s["score"], s["category"]))
+            texts = [f["text"] for f in s["flags"]]
+            for want in ("fancy look-alike letters", "built from your own email name", "cloud-storage bucket", "Storage-full"):
+                check(f"Gmail PDF [{label}]: flags '{want}'", any(want in t for t in texts), texts)
+            j = fup("gmail_trailhead_receipt.pdf").json
+            check(f"Gmail PDF [{label}]: genuine receipt with long tracking links stays safe", j["scan"]["score"] < 30, (j["scan"]["score"], [f["text"] for f in j["scan"]["flags"]]))
+o = m.parse_mail_print("Gmail      Jordan Lee <jlee4817.mail@gmail.com>\n\nHello\n1 message\nShop <a@shop.example>  Mon, Oct 19, 2026 at 9:10 AM\n\nHi")
+check("Gmail print header with the account's own address isn't taken as the sender",
+      o["sender"] == "Shop <a@shop.example>" and o["headers"] == {"to": "Jordan Lee <jlee4817.mail@gmail.com>"} and o["subject"] == "Hello", o)
+check("fancy letters are read as plain text by the rules", m.fold_styled("𝗣aym𝗲nt ｆｒｅｅ ﬁle") == "Payment free file", m.fold_styled("𝗣aym𝗲nt ｆｒｅｅ ﬁle"))
+check("a 'Daily Messenger' newspaper isn't called a Messenger impersonation",
+      c.post("/api/phishguard/scan", json={"mode": "email", "sender": "The Daily Messenger <news@dailymessenger.com>", "subject": "Headlines", "body": "Today's news."}).json["score"] < 30)
+print(f"\n{len(fails)} failures (after Gmail-PDF checks)", fails)
 sys.exit(1 if fails else 0)

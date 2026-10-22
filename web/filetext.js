@@ -2,26 +2,53 @@
 (function (root) {
 "use strict";
 const ADDR = /([^<>\n]*?<\s*[^<>@\s]+@[^<>\s]+\s*>)/;
+const MSG_COUNT = /^\d+ messages?$/i;
+const DATE_COLUMN = /(?<=\S)\s{2,}(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*,? \w+ \d{1,2},?(?: \d{4})?(?: at)?(?: \d{1,2}:\d{2}.*)?|\d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?(?: \(.*\))?)\s*$/i;
+const MAIL_DATE = /^(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*,? \w+ \d{1,2},? \d{4}(?: at)?(?: \d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?)?|\d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?)$/i;
+const STYLED_C = "\\u{1D400}-\\u{1D7FF}";
+function fixStyledName(name) {  // "𝗣 aym 𝗲 nt" (split where the font changed) → "𝗣aym𝗲nt"
+  if (!new RegExp(`[${STYLED_C}]`, "u").test(name)) return name;
+  name = name.replace(new RegExp(`(^|[\\sa-z])([${STYLED_C}]) (?=[a-z])`, "gu"), "$1$2");
+  return name.replace(new RegExp(`(?<=[a-z]) (?=[${STYLED_C}][a-z]?)`, "gu"), "");
+}
 function parseMailPrint(text) {
   const lines = String(text || "").split(/\r?\n/).map(l => l.replace(/\s+$/, ""));
-  for (let i = 0; i < Math.min(lines.length, 25); i++) {
+  for (let n = 0; n < Math.min(lines.length, 30); n++) lines[n] = lines[n].replace(DATE_COLUMN, "");  // the date printed in a column to the right
+  for (let n = 0; n < Math.min(lines.length, 30) - 1; n++)  // "Name <you.1234@long-domain-" + "name.example>": a long address wrapped
+    if (/<[^<>\s]*@[^<>\s]*$/.test(lines[n]) && /^\s*[^\s<>]*>/.test(lines[n + 1])) {
+      const rest = lines[n + 1].trim(), k = rest.indexOf(">");
+      lines[n] += rest.slice(0, k + 1); lines[n + 1] = rest.slice(k + 1);
+    }
+  let recipient = "";
+  let gmailAt = -1;
+  for (let n = 0; n < Math.min(lines.length, 6); n++) if (/^\s*gmail\b/i.test(lines[n])) { gmailAt = n; break; }
+  for (let i = 0; i < Math.min(lines.length, 30); i++) {
     const m = ADDR.exec(lines[i].trim());
     if (!m || /^\s*(?:to|cc|bcc|reply-to)\s*:/i.test(lines[i])) continue;
-    const sender = m[1].replace(/^\s*from:\s*/i, "").trim();
-    let subject = "";
-    for (let k = i - 1; k >= 0; k--) {
+    if (i === gmailAt) { recipient = m[1].replace(/^\s*gmail\s*/i, "").trim(); continue; }  // "Gmail   Your Name <you@gmail.com>": the account it was printed from
+    const sender = fixStyledName(m[1].replace(/^\s*from:\s*/i, "").trim().replace(/\s{2,}/g, " "));
+    let subject = "", countAt = -1;
+    for (let n = i - 1; n >= 0; n--) if (MSG_COUNT.test(lines[n].trim())) { countAt = n; break; }
+    if (gmailAt >= 0 && countAt > gmailAt)  // Gmail prints the whole subject (it may wrap) above "1 message"
+      subject = lines.slice(gmailAt + 1, countAt).map(l => l.trim()).filter(l => l && !ADDR.test(l)).join(" ").replace(/(?<=-) (?=\w)/g, "");
+    if (!subject) for (let k = i - 1; k >= 0; k--) {
       const p = lines[k].trim();
       if (p && !/^(?:\d+ messages?|gmail\b.*|outlook\b.*|inbox|print)$/i.test(p) && !p.includes("@")) { subject = p; break; }
     }
-    let replyTo = "", j = i + 1;
-    while (j < lines.length && (!lines[j].trim() || /^\s*(?:reply-to|to|cc|bcc|date|sent|subject)\s*:/i.test(lines[j]))) {
+    let replyTo = "", to = "", j = i + 1;
+    while (j < lines.length && (!lines[j].trim() || /^\s*(?:reply-to|to|cc|bcc|date|sent|subject)\s*:/i.test(lines[j]) || MAIL_DATE.test(lines[j].trim()))) {
       const rm = /^\s*reply-to\s*:\s*(.+)$/i.exec(lines[j]); if (rm) replyTo = rm[1].trim();
+      const tm = /^\s*to\s*:\s*(.+)$/i.exec(lines[j]); if (tm && !to) to = tm[1].trim();
       const sm = /^\s*subject\s*:\s*(.+)$/i.exec(lines[j]); if (sm && !subject) subject = sm[1].trim();
       j++;
     }
     const body = lines.slice(j).map(l => l.trim()).join("\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-    return {mode: "email", sender: sender.slice(0, 200), subject: subject.slice(0, 300), body: body.slice(0, 5000),
-            headers: replyTo ? {reply_to: replyTo} : null};
+    to = to || recipient;
+    const headers = {};
+    if (replyTo) headers.reply_to = replyTo.slice(0, 200);
+    if (to) headers.to = to.slice(0, 200);
+    return {mode: "email", sender: sender.slice(0, 200), subject: subject.replace(/\s+/g, " ").slice(0, 300), body: body.slice(0, 5000),
+            headers: Object.keys(headers).length ? headers : null};
   }
   return null;
 }
@@ -113,23 +140,67 @@ function loadPdfJs() {
   });
   return pdfjsPromise;
 }
-async function pdfText(buf) {
+const LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"};
+const PAGE_CHROME = /^\s*(?:page \d+ of \d+|\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2}\s?[ap]\.?m\.?\s.*|https:\/\/mail\.google\.com\/\S*(?:\s+\d+\/\d+)?|https:\/\/outlook\.\S+(?:\s+\d+\/\d+)?)\s*$/gim;
+function cleanPdfText(text) {  // undo what printing to PDF does: ligatures (ﬁ → fi), page headers / footers
+  text = Array.from(String(text || ""), ch => LIGATURES[ch] || ch).join("").replace(/­|​/g, "").replace(/\x7f/g, "•");
+  return text.replace(PAGE_CHROME, "").replace(/\s*\bpage \d+ of \d+\s*$/gim, "");
+}
+function hiddenLinks(links, body, limit) {  // addresses behind buttons that aren't already written in the text
+  const seen = new Set(), out = [], low = String(body || "").toLowerCase();
+  for (let u of links || []) {
+    u = String(u || "").trim();
+    if (!/^https?:\/\//i.test(u) || /^https?:\/\/mail\.google\.com\//i.test(u)) continue;
+    const key = u.split("#")[0].replace(/\/+$/, "").toLowerCase();
+    if (seen.has(key) || low.includes(key)) continue;
+    seen.add(key); out.push(u.slice(0, 300));
+  }
+  return out.slice(0, limit || 6);
+}
+async function pdfRead(buf) {
   const lib = await loadPdfJs();
   const doc = await lib.getDocument({data: new Uint8Array(buf), isEvalSupported: false}).promise;
-  const out = [];
+  const out = [], links = [];
   for (let p = 1; p <= Math.min(doc.numPages, 10); p++) {
-    const tc = await (await doc.getPage(p)).getTextContent();
-    let line = "", lastY = null;
-    for (const it of tc.items) {
-      const y = it.transform ? Math.round(it.transform[5]) : lastY;
-      if (lastY !== null && y !== lastY) { out.push(line); line = ""; }
-      line += (line && !line.endsWith(" ") && it.str && !it.str.startsWith(" ") ? " " : "") + it.str;
-      lastY = y;
-      if (it.hasEOL) { out.push(line); line = ""; lastY = null; }
+    const page = await doc.getPage(p);
+    const items = (await page.getTextContent()).items.filter(it => it.str && it.transform)
+      .map(it => ({s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: Math.abs(it.transform[3]) || it.height || 10}));
+    // rebuild lines from where each piece of text sits on the page, so words split by a font change (ﬁ, 𝗕𝗼𝗹𝗱) join up again
+    items.sort((a, b) => b.y - a.y || a.x - b.x);
+    const rows = [];
+    for (const it of items) {
+      const row = rows.find(r => Math.abs(r.y - it.y) <= Math.max(2, Math.min(r.h, it.h) * 0.45));
+      if (row) { row.items.push(it); row.h = Math.max(row.h, it.h); } else rows.push({y: it.y, h: it.h, items: [it]});
     }
-    if (line) out.push(line);
+    rows.sort((a, b) => b.y - a.y);
+    let prevY = null, prevH = 0;
+    for (const r of rows) {
+      r.items.sort((a, b) => a.x - b.x);
+      let line = "", end = null;
+      for (const it of r.items) {
+        const gap = end === null ? 0 : it.x - end;
+        if (line && gap > it.h * 0.18 && !line.endsWith(" ") && !it.s.startsWith(" ")) line += gap > it.h * 3 ? "   " : " ";
+        line += it.s; end = it.x + it.w;
+      }
+      if (prevY !== null && prevY - r.y > Math.max(prevH, r.h) * 1.9) out.push("");
+      out.push(line.replace(/\s+$/, "")); prevY = r.y; prevH = r.h;
+    }
+    try {
+      for (const a of await page.getAnnotations()) { const u = a.url || a.unsafeUrl; if (u) links.push(String(u)); }
+    } catch (e) {}
+    out.push("");
   }
-  return out.join("\n");
+  return {text: cleanPdfText(out.join("\n")), links};
+}
+async function pdfText(buf) { return (await pdfRead(buf)).text; }
+function parsePdf(read) {  // {text, links} → what the scanner needs, with the hidden button links added
+  const x = parsePlain(read.text);
+  const extra = hiddenLinks(read.links, x.body);
+  if (extra.length) {
+    const tail = `\n\n${x.mode === "email" ? "Links in this email" : "Links in this document"}:\n` + extra.join("\n");
+    x.body = x.body.slice(0, 5000 - tail.length) + tail;
+  }
+  return x;
 }
 /* ── Screenshots without Claude: Tesseract.js reads them on this device (same parsing as the server's offline reader) ── */
 const TIME = "\\d{1,2}:\\d{2}(?:\\s?[ap]\\.?m\\.?)?";
@@ -238,5 +309,5 @@ async function ocrImage(blob, uiLang) {
   const {data} = await watchdog(worker.recognize(await screenCanvas(blob)), 30000, "Reading the screenshot took too long. Try a smaller screenshot, or paste the text instead.");
   return parseScreen(data.text || "");
 }
-root.FileText = {parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, parseScreen, ocrImage};
+root.FileText = {parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, pdfRead, parsePdf, cleanPdfText, hiddenLinks, parseScreen, ocrImage};
 })(typeof window !== "undefined" ? window : globalThis);
