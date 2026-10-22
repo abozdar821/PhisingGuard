@@ -7,6 +7,14 @@
 
 ---
 
+> **New: [`phishguard-app/`](phishguard-app/)** is the standalone PhishGuard app (Python + installable phone app) with the
+> SOC Threat Dashboard. It checks texts, emails, phone calls, links, QR codes and uploaded files (screenshots, PDFs,
+> `.eml`, voicemail), works in 8 languages with results in English, Español, اردو and हिन्दी, and runs offline. See
+> [phishguard-app/README.md](phishguard-app/README.md) and [PHONE_SETUP.md](phishguard-app/PHONE_SETUP.md).
+> The rest of this README describes the original Next.js + DynamoDB hackathon version in this folder's root.
+
+---
+
 ## What it does
 
 PhishGuard AI analyzes SMS, email, and other messages for phishing, smishing, job-recruitment scams, gift-card fraud, romance scams, and brand impersonation. It returns a 0–100 risk score, a plain-language explanation, red flags, and recommended actions — backed by a continuously-growing threat intelligence database stored in AWS DynamoDB.

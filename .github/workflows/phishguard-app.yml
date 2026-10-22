@@ -1,0 +1,39 @@
+# Runs the PhishGuard app's tests (phishguard-app/) whenever it changes.
+name: PhishGuard app tests
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "phishguard-app/**", ".github/workflows/phishguard-app.yml" ]
+  pull_request:
+    paths: [ "phishguard-app/**", ".github/workflows/phishguard-app.yml" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: phishguard-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Tesseract (offline screenshot reading) and poppler (PDFs)
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+      - name: Install Python packages
+        run: pip install flask requests pillow pytesseract pypdf
+      - name: PhishGuard server app
+        run: python tests/test_phishguard.py
+      - name: SOC dashboard
+        run: python tests/test_soc_dashboard.py
+      - name: Combined app
+        run: python tests/test_combined_phishguard.py && python tests/test_combined_soc.py
+      - name: Sandbox (labelled scenarios, offline)
+        run: python sandbox.py --scenarios sandbox_scenarios.example.json --out "$RUNNER_TEMP/sandbox"
+      - name: Phone version engine matches the Python engine, and every result is translated
+        working-directory: phishguard-app/web
+        run: node parity.js && node parity2.js && node i18n_coverage.js
