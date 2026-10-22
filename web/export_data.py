@@ -17,7 +17,7 @@ d.update({"THREAT_INTEL": m.THREAT_INTEL, "BBB_CASES": m.BBB_CASES, "PG_NEVER_LE
 # every PhishGuard rule list, so the in-browser engine can never run on stale data
 for k in ("PG_ADULT", "PG_BAD_TLDS", "PG_BRANDS", "PG_BRAND_NAMES", "PG_FINANCIAL", "PG_GREETINGS", "PG_INSURANCE",
           "PG_KNOWN_TLDS", "PG_LOOKALIKES", "PG_SHORTENERS", "PG_URGENCY", "PG_FREE_HOSTS", "PG_SCAM_WORDS",
-          "PG_CRYPTO_WORDS", "PG_CRYPTO_OFFICIAL", "PG_CONFUSABLES", "JOB_COMPANIES", "JOB_PERSONAS", "JOB_PHRASES", "DEBT_COMPANIES"):
+          "PG_CRYPTO_WORDS", "PG_CRYPTO_OFFICIAL", "PG_BUCKET_HOSTS", "PG_FREE_SUBDOMAINS", "PG_DISPLAY_BRANDS", "PG_CONFUSABLES", "JOB_COMPANIES", "JOB_PERSONAS", "JOB_PHRASES", "DEBT_COMPANIES"):
     v = getattr(m, k)
     d[k] = sorted(v) if isinstance(v, (set, frozenset)) else v
 json.dump(d, open(path, "w"), ensure_ascii=False)

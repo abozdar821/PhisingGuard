@@ -216,6 +216,17 @@ function createEngine(D, env) {
   const has = (text, list) => list.filter(p => phraseRx(p).test(text));
   const SHORT = new Set(D.PG_SHORTENERS), BAD_TLD = new Set(D.PG_BAD_TLDS), KNOWN_TLD = new Set(D.PG_KNOWN_TLDS), NEVER = new Set(D.PG_NEVER_LEARN);
   const brandName = b => D.PG_BRAND_NAMES[b] || b.replace(/\b\w/g, c => c.toUpperCase());
+  const STYLED = /[\u{1D400}-\u{1D7FF}]/u;
+  const foldStyled = t => Array.from(String(t || ""), ch => { const c = ch.codePointAt(0);
+    return (c >= 0x1D400 && c <= 0x1D7FF) || (c >= 0xFB00 && c <= 0xFB06) || (c >= 0xFF01 && c <= 0xFF5E) ? ch.normalize("NFKC") : ch; }).join("");
+  function randomLabel(host) {
+    for (const lb of host.toLowerCase().split(".").slice(0, -1)) {
+      if (lb.length < 10 || lb.includes("-")) continue;
+      if (/[a-z]\d+[a-z]/.test(lb) && (lb.match(/\d/g) || []).length >= 2) return lb;
+      if (/^[a-z]+$/.test(lb) && (lb.match(/[aeiou]/g) || []).length / lb.length < 0.2) return lb;
+    }
+    return "";
+  }
 
   function registeredDomain(host) {
     const parts = (host || "").toLowerCase().replace(/^\.+|\.+$/g, "").split(".");
@@ -379,7 +390,7 @@ function createEngine(D, env) {
     if (/balance:?\s*\$[\d,.]+.{0,40}to pay/.test(b)) M.add(15, "Balance + \"To Pay\" link — pay-now pressure");
     return M;
   }
-  function senderModule(sn, mode) {
+  function senderModule(sn, mode, styledName) {
     const M = mod();
     if (mode === "sms" && sn.kind === "phone") {
       const v = sn.value;
@@ -390,13 +401,22 @@ function createEngine(D, env) {
     if (sn.kind === "email") {
       const dom = sn.domain, hay = (sn.display + " " + sn.value.split("@")[0]).toLowerCase();
       const squashed = sn.display.toLowerCase().replace(/[^a-z]/g, "");
+      let claimed = false;
       for (const [brand, legit] of Object.entries(D.PG_BRANDS)) {
         const key = brand.replace(/ /g, "");
         const named = new RegExp("(?<![a-z])" + reEsc(brand) + "(?![a-z])").test(hay) || (key.length >= 6 && squashed.includes(key.replace(/-/g, "")));
         if (named && !legit.some(l => dom === l || dom.endsWith("." + l))) {
-          M.add(40, `Claims to be ${brandName(brand)} but sends from ${dom}`); break;
+          M.add(40, `Claims to be ${brandName(brand)} but sends from ${dom}`); claimed = true; break;
         }
       }
+      for (const [brand, legit] of Object.entries(D.PG_DISPLAY_BRANDS))
+        if (!claimed && [brand, "facebook" + brand, "meta" + brand].includes(squashed) && !legit.some(l => dom === l || dom.endsWith("." + l)))
+          M.add(40, `Claims to be ${brandName(brand)} but sends from ${dom}`);
+      if (styledName) M.add(20, "Sender name is written in fancy look-alike letters (like 𝗣aym𝗲nt) to slip past spam filters");
+      const freeSub = hostIn(dom, D.PG_FREE_SUBDOMAINS);
+      if (freeSub) M.add(15, `Sends from a cheap sub-domain service (.${freeSub}) that anyone can sign up for anonymously`);
+      const rnd = randomLabel(dom);
+      if (rnd) M.add(10, `Sender's domain contains a random, machine-made name (${rnd}), typical of throw-away spam domains`);
       if (D.PG_LOOKALIKES.some(t => dom.includes(t))) M.add(25, `Look-alike sender domain: ${dom}`);
       const tld = dom.split(".").pop();
       if (BAD_TLD.has(tld)) M.add(15, `High-abuse domain ending: .${tld}`);
@@ -404,17 +424,20 @@ function createEngine(D, env) {
     } else if (mode === "email") M.add(10, "Sender is not a valid email address");
     return M;
   }
+  const ROMANCE = /(?:near you|nearby|in your area|around you)\b[^.!?\n]{0,60}\b(?:wants? to|chat|meet|connect|reach you)|wants? to (?:chat|meet you|get to know you|reach you)|you seem (?:familiar|nice|interesting)|i (?:think i )?saw your (?:profile|photo|comment|picture)/;
   const NOTIFY = /request for correspondence|correspondence request|sent you a (?:private )?(?:message|request|document|file|voice ?note)|you have (?:\d+ )?(?:new |unread |pending |undelivered |missed )+(?:messages?|requests?|documents?|voicemails?|voice notes?)|(?:message|request|document|voicemail)s? (?:is |are )?(?:waiting|pending|on hold) for you|messages? (?:could not|couldn't) be delivered/;
-  function contentModule(t, subject, mode) {
+  function contentModule(t, subject, mode, styledText) {
     const M = mod();
-    const urg = has(t, D.PG_URGENCY); if (urg.length) M.add(Math.min(urg.length * 4, 20), `Urgency / pressure words: ${urg.slice(0, 4).join(", ")}`);
+    const urg = has(t.replace(/(?:nobel|pulitzer) prize/g, " "), D.PG_URGENCY); if (urg.length) M.add(Math.min(urg.length * 4, 20), `Urgency / pressure words: ${urg.slice(0, 4).join(", ")}`);
+    if (styledText && (mode === "sms" || mode === "email")) M.add(15, "Uses fancy look-alike letters in the text to slip past spam filters");
+    if ((mode === "sms" || mode === "email") && ROMANCE.test(t)) M.add(20, "Romance / dating bait: a stranger \"nearby\" who wants to chat");
     if (mode === "sms" && /\b(?:reply|text|send)\s+stop\b/.test(t)) M.add(10, "\"Reply STOP\" — automated bulk text");
     const user = /(?:^|\n|dear\s+|hi\s+|hello\s+|name:\s*)([a-z][a-z0-9]*\d[a-z0-9]*(?:[._][a-z0-9]+)+)(?=[\s,:]|$)/.exec(t);
     if (user && (mode === "sms" || mode === "email")) M.add(15, `Calls you by an email username ("${user[1]}") instead of your name, typical of mass mailings`);
     if ((mode === "sms" || mode === "email") && NOTIFY.test(t)) M.add(15, "Fake \"you have a message / request\" notice that pushes you to click");
     if (/save\s+(?:up\s+to\s+)?\$?\d+|as\s+low\s+as\s+\$?\d+/.test(t)) M.add(12, "Promises a specific savings amount");
     const fin = has(t, D.PG_FINANCIAL); if (fin.length >= 2) M.add(15, `Money-related lures: ${fin.slice(0, 3).join(", ")}`);
-    const ins = has(t, D.PG_INSURANCE); if (ins.length >= 2) M.add(18, `Unsolicited insurance offer: ${ins.slice(0, 3).join(", ")}`);
+    const ins = has(t, D.PG_INSURANCE); if (ins.length >= 2 && /\bquotes?\b|\bsave\b|\bsavings\b|\bpremiums?\b|\bqualify\b|\brates?\b|\bcompare\b/.test(t)) M.add(18, `Unsolicited insurance offer: ${ins.slice(0, 3).join(", ")}`);
     const ad = has(t, D.PG_ADULT); if (ad.length) M.add(30, `Adult / romance bait: ${ad.slice(0, 3).join(", ")}`);
     if (has(t, D.PG_GREETINGS).length) M.add(10, "Generic greeting instead of your name");
     if (subject) {
@@ -428,7 +451,7 @@ function createEngine(D, env) {
     if (links.length && /\b(?:tolls?|e-?zpass|sunpass|fastrak|quick ?pass|parcel|package|delivery|redeliver\w*|shipment)\b/.test(t)
         && /\b(?:unpaid|outstanding|balance|fee|settle|pay)\b/.test(t)) add(40, "Toll or delivery fee demanded through a link", "toll");
     if (/late fee|penalt|avoid (?:a|additional|further)/.test(t)) add(10, "Threatens late fees or penalties", "toll");
-    if (/payment (?:attempt )?(?:has )?(?:failed|failure|declined|was declined|could not be processed)|unable to (?:process|renew|charge)|failed to renew|(?:subscription|membership|account) (?:has )?(?:expired|been (?:cancell?ed|suspended|terminated|removed))|will be (?:removed|deleted|terminated|suspended|cancell?ed)/.test(t) && /update (?:my |your )?(?:payment|billing|card)|renew|re-?activate|payment (?:details|information|method)|billing (?:details|information)|click (?:on )?the link|click below/.test(t)) { add(20, "Says a payment or subscription failed and pushes you to re-enter card details", "billing");
+    if (/payment (?:attempt )?(?:has )?(?:failed|failure|declined|was declined|could not be processed)|unable to (?:process|renew|charge)|failed to renew|(?:payment method|card) (?:on file )?(?:has )?expired|issue while attempting to (?:renew|charge|process)|(?:subscription|membership|account) (?:has )?(?:expired|been (?:cancell?ed|suspended|terminated|removed))|will be (?:removed|deleted|terminated|suspended|cancell?ed)/.test(t) && /update (?:my |your )?(?:payment|billing|card)|renew|re-?activate|payment (?:details|information|method)|billing (?:details|information)|click (?:on )?the link|click below/.test(t)) { add(20, "Says a payment or subscription failed and pushes you to re-enter card details", "billing");
       if (links.length || /\btoday\b|immediately|within \d+ ?h|will be (?:removed|deleted)|click/.test(t)) add(10, "Rushes you to fix the payment through the message itself", "billing"); }
     if (/(?:did not|didn't|not you|don'?t recogni[sz]e)\W.{0,40}?(?:authori[sz]e|make|place|purchase)|unauthori[sz]ed/.test(t) && /\bcall\b/.test(t) && phones.length) {
       add(45, "Unexpected charge plus “call this number” (callback scam)", "callback");
@@ -444,6 +467,15 @@ function createEngine(D, env) {
     if (/\b(?:direct deposit|payroll|bank(?:ing)? (?:details|information|info)|account details)\b/.test(t)
         && /\b(?:update|change|confirm|verify|send|reply)\b/.test(t) && !links.length)
       add(25, "Asks to update or confirm bank / direct-deposit details by message (payroll diversion)", "payroll");
+    if (/storage (?:is )?(?:almost |nearly )?full|\d{2,3}\s?% (?:of (?:your )?)?storage|out of (?:storage|space)|free up (?:space|storage)|(?:photos|videos|files|emails?|data)(?: and (?:photos|videos|files|emails?|data))? (?:will|may|could) be (?:permanently )?(?:deleted|removed|lost|erased)/.test(t)
+        && /\b(?:cloud|storage|icloud|drive|photos|upgrade)\b/.test(t))
+      add(25, "Storage-full / \"your files will be deleted\" scare, a common fake cloud-storage email", "billing");
+    if (/expires? in \d+ (?:minutes?|mins?|hours?|seconds?)|\d+ (?:minutes?|mins?) (?:left|remaining)/.test(t)) add(10, "Fake countdown timer to rush you", "countdown");
+    if (/\b(?:reverse[sd]?|cure[sd]?|eliminate[sd]?|restore[sd]?|melts? away|rejuvenat\w*)\b[^.!?]{0,80}\b(?:vision|eyesight|cataracts?|glaucoma|diabetes|blood sugar|neuropathy|tinnitus|hearing loss|joint pain|arthritis|belly fat|dementia|memory loss|hair loss|blood pressure|eye cells)\b|\b(?:simple|weird|strange|\d+-second|morning|bedtime|kitchen|home) (?:trick|protocol|ritual|hack|remedy|method)\b/.test(t)) {
+      add(25, "Miracle health-cure claim (a 'simple trick' that reverses an illness), typical of supplement scams", "health");
+      if (/\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b|doctors? (?:hate|don'?t want you)|big pharma/.test(t))
+        add(10, "Borrows a famous university or TV network's name to look credible", "health");
+    }
     if (links.length && /did you (?:attempt|make|authori[sz]e)/.test(t) && /reply (?:yes|no|y|n)\b/.test(t)) add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert");
     return { M, kinds };
   }
@@ -489,6 +521,12 @@ function createEngine(D, env) {
     const rtDom = rt.kind === "email" ? registeredDomain(rt.domain) : "";
     if (fromDom && rtDom && rtDom !== fromDom)
       M.add(FREEMAIL.has(rtDom) ? 30 : 20, `Replies would go to ${FREEMAIL.has(rtDom) ? "a personal " + rtDom + " address" : rtDom}, not the sender's ${fromDom}`);
+    const to = normalizeSender(String(headers.to || ""));
+    if (to.kind === "email" && sn.kind === "email") {
+      const toUser = to.value.slice(0, to.value.lastIndexOf("@"));
+      if (toUser.length >= 4 && sn.value.split("@")[0].includes(toUser) && registeredDomain(to.domain) !== fromDom)
+        M.add(25, "The sender's address is built from your own email name, a trick bulk spammers use to look personal");
+    }
     const auth = String(headers.auth || "").toLowerCase();
     const failed = ["spf", "dkim", "dmarc"].filter(k => new RegExp(`\\b${k}=(?:fail|softfail|permerror)\\b`).test(auth)).map(k => k.toUpperCase());
     if (failed.length) M.add(Math.min(50, 10 * failed.length + (failed.includes("DMARC") ? 25 : 0)),
@@ -501,7 +539,8 @@ function createEngine(D, env) {
   const unq = x => { try { return decodeURIComponent(x); } catch (e) { return x.replace(/%([0-9a-f]{2})/gi, (m, h) => String.fromCharCode(parseInt(h, 16))); } };
   const after = (str, sub) => { const i = str.indexOf(sub); return i < 0 ? str : str.slice(i + sub.length); };
   const hostIn = (host, list) => list.find(h => host === h || host.endsWith("." + h)) || "";
-  function linkModule(links, mode, b) {
+  const BUCKETS = D.PG_BUCKET_HOSTS;
+  function linkModule(links, mode, b, senderDom) {
     const M = mod(), kinds = new Set();
     const add = (p, x, kind) => { M.add(p, x); if (kind) kinds.add(kind); };
     if (/(?<![a-z])upi:\/\/pay/.test(b)) {
@@ -511,6 +550,8 @@ function createEngine(D, env) {
     } else if (/(?<![a-z])(?:bitcoin|ethereum|litecoin|tron|usdt):[a-z0-9]{20,}/.test(b)) add(20, "Opens a crypto payment request");
     if (!links.length) return { M, kinds };
     if (mode === "sms") M.add(10, `Contains ${links.length} link(s) — unsolicited texts rarely need one`);
+    const ownSite = senderDom ? registeredDomain(senderDom) : "";
+    let longLink = false, rndHost = "";
     for (const ln of links.slice(0, 6)) {
       const host = ln.host, dom = ln.domain, url = ln.url, urlL = url.toLowerCase(), tld = host.split(".").pop();
       const path = after(urlL, host);
@@ -546,7 +587,10 @@ function createEngine(D, env) {
         const own = new Set(Object.entries(D.PG_BRANDS).filter(([, legit]) => legit.includes(dom)).map(([br]) => br));
         if (Object.keys(D.PG_BRANDS).some(br => !own.has(br) && (host + path).replace(/-/g, "").includes(br.replace(/ /g, ""))) || PATH_LOGIN.test(path))
           M.add(15, "Free-hosted page posing as a sign-in or brand page");
+        if (hostIn(host, BUCKETS) && /\.html?$/.test(path.split("?")[0].split("#")[0]))
+          M.add(15, "Opens a lone web page stored in a cloud-storage bucket, a free, throw-away way to host scam pages");
       }
+      if (!trusted && !rndHost && randomLabel(host)) rndHost = host;
       if (!trusted && !CRYPTO_OFFICIAL.has(dom) && CRYPTO_WORDS.some(w => (host + path).includes(w)))
         add(35, `Crypto airdrop / wallet-connect page, a common way to empty wallets: ${host}`, "crypto");
       if (!trusted && !free) {
@@ -569,8 +613,10 @@ function createEngine(D, env) {
           if (sub.length) { const r2 = linkModule(sub, "link", b); r2.M.fl.forEach(([p, x]) => M.add(p, x)); r2.kinds.forEach(k => kinds.add(k)); }
         }
       }
-      if (url.length > 200 || (urlL.match(/%[0-9a-f]{2}/g) || []).length >= 6) M.add(10, "Link is unusually long or disguised with encoded characters");
+      if ((url.length > 200 || (urlL.match(/%[0-9a-f]{2}/g) || []).length >= 6) && dom !== ownSite) longLink = true;
     }
+    if (rndHost) M.add(10, `Link uses a random, machine-made web address: ${rndHost}`);
+    if (longLink) M.add(10, "Link is unusually long or disguised with encoded characters");
     return { M, kinds };
   }
 
@@ -622,6 +668,9 @@ function createEngine(D, env) {
   function scan(mode, sender, subject, body, headers, lang, appWarning) {
     mode = ["email", "call", "link"].includes(mode) ? mode : "sms";
     if (mode !== "email") headers = null;
+    const rawSender = sender, rawSubject = subject, rawBody = body;
+    const styledName = STYLED.test(sender.includes("@") ? normalizeSender(sender).display : sender), styledText = STYLED.test(subject + body);
+    sender = foldStyled(sender); subject = foldStyled(subject); body = foldStyled(body);
     const sn = normalizeSender(sender);
     const links = extractLinks(body + " " + (mode === "email" ? subject : ""));
     const phones = extractPhones(normalizeText(body)), b = body.toLowerCase(), t = (subject + "\n" + body).toLowerCase();
@@ -642,9 +691,9 @@ function createEngine(D, env) {
     if (imp >= 50) hard = true;
     const job = take("Job-scam detector", jobModule(b, sn));
     const debt = take("Debt-fraud detector", debtModule(b, body, links));
-    take("Sender analysis", senderModule(sn, mode));
-    take("Content analysis", contentModule(t, subject, mode));
-    const { M: linkM, kinds: lk } = linkModule(links, mode, b);
+    take("Sender analysis", senderModule(sn, mode, styledName));
+    take("Content analysis", contentModule(t, subject, mode, styledText));
+    const { M: linkM, kinds: lk } = linkModule(links, mode, b, sn.domain);
     const linkSc = take("Link analysis", linkM);
     const { M: lure, kinds } = lureModule(t, links, phones);
     take("Lure detector", lure);
@@ -678,16 +727,17 @@ function createEngine(D, env) {
     else if (kinds.has("gift") && lure.sc >= 45) category = "Gift-card scam";
     else if (kinds.has("pig") && lure.sc >= 40) category = "Investment scam (pig-butchering)";
     else if (kinds.has("billing") && lure.sc >= 30) category = "Billing / subscription scam";
+    else if (kinds.has("health") && lure.sc >= 25) category = "Health / miracle-cure spam";
     else if (kinds.has("callback")) category = "Callback phishing";
     else if ((kinds.has("toll") && lure.sc >= 40) || (lk.has("toll") && score >= 40)) category = "Toll / delivery fee scam";
     else if (spoof || lk.has("brand")) category = "Brand impersonation phishing";
     else if (flags.some(f => f.text.includes("insurance")) && score >= 30) category = "Insurance marketing spam";
-    else if (flags.some(f => f.text.includes("Adult"))) category = "Adult / romance spam";
+    else if (flags.some(f => f.text.includes("Adult") || f.text.includes("Romance"))) category = "Adult / romance spam";
     else if (learned.length) category = "Previously confirmed scam";
     else if (score >= 30) category = mode === "link" ? "Suspicious link" : "Suspicious message";
     if (mode === "link" && score < 30 && !hard) category = null;
     pgCounters.scanned++;
-    const s = { id: "pg-" + (++S.seq.scan), time: iso(), mode, sender: sender.slice(0, 200), subject: subject.slice(0, 300), body: body.slice(0, 5000),
+    const s = { id: "pg-" + (++S.seq.scan), time: iso(), mode, sender: rawSender.slice(0, 200), subject: rawSubject.slice(0, 300), body: rawBody.slice(0, 5000),
       sender_norm: sn, links, phones, heuristic_score: score, modules, category, hard,
       flags: flags.map((f, i) => [f, i]).sort((x, y) => y[0].points - x[0].points || x[1] - y[1]).map(([f]) => f),
       bbb: bbb ? { id: bbb.id, type: bbb.type, business: bbb.business, reported: bbb.reported, location: bbb.location, url: bbb.url, note: bbb.note } : null,

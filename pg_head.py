@@ -39,6 +39,7 @@ import re
 import sqlite3
 import sys
 import threading
+import unicodedata
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor

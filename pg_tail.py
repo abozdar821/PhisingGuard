@@ -368,56 +368,139 @@ def transcribe_audio(data: bytes, mime: str) -> dict:
     raise ValueError("Couldn't transcribe the recording — " + "; ".join(errors))
 
 
-def _pdf_text(data: bytes) -> str:
+_LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}
+_STYLED = "\U0001d400-\U0001d7ff"  # 𝗕𝗼𝗹𝗱 / 𝙼𝚘𝚗𝚘 "fancy" letters spammers use to dodge filters
+_PAGE_CHROME = re.compile(r"(?im)^\s*(?:page \d+ of \d+|\d{1,2}/\d{1,2}/\d{2,4},? \d{1,2}:\d{2}\s?[ap]\.?m\.?\s.*|"
+                          r"https://mail\.google\.com/\S*(?:\s+\d+/\d+)?|https://outlook\.\S+(?:\s+\d+/\d+)?)\s*$")
+
+
+def clean_pdf_text(text: str) -> str:
+    """Undo what printing to PDF does to text: ligatures (ﬁ → fi), page headers / footers, stray spaces in styled names."""
+    text = "".join(_LIGATURES.get(ch, ch) for ch in text or "").replace("­", "").replace("​", "")
+    text = re.sub(r"(?im)\s*\bpage \d+ of \d+\s*$", "", _PAGE_CHROME.sub("", text))
+    return text
+
+
+def _pdf_text(data: bytes) -> tuple[str, list[str]]:
+    """Text in reading order plus the web addresses hidden behind links and buttons."""
+    import shutil
+    import subprocess
+    import tempfile
+    text, links, reader = "", [], None
     try:
         import io
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data))
-        return "\n".join((pg.extract_text() or "") for pg in reader.pages[:10])
+        for pg in reader.pages[:10]:
+            try:
+                for a in pg.get("/Annots") or []:
+                    act = a.get_object().get("/A")
+                    uri = act.get_object().get("/URI") if act else None
+                    if uri:
+                        links.append(str(uri))
+            except Exception:
+                pass
     except ImportError:
         pass
-    import shutil
-    import subprocess
-    import tempfile
-    if not shutil.which("pdftotext"):
-        raise LookupError("Reading PDFs needs pypdf (pip install pypdf)")
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-        tmp.write(data)
-        tmp.flush()
-        out = subprocess.run(["pdftotext", "-l", "10", "-layout", tmp.name, "-"], capture_output=True, timeout=30)
-    return out.stdout.decode("utf-8", "replace")
+    if shutil.which("pdftotext"):  # poppler keeps words that switch fonts (ﬁ, 𝗕𝗼𝗹𝗱) whole and lines in reading order
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+            tmp.write(data)
+            tmp.flush()
+            try:
+                out = subprocess.run(["pdftotext", "-l", "10", "-raw", "-enc", "UTF-8", tmp.name, "-"], capture_output=True, timeout=30)
+                text = out.stdout.decode("utf-8", "replace")
+            except (OSError, subprocess.SubprocessError):
+                text = ""
+    if not text.strip() and reader is not None:
+        text = "\n".join((pg.extract_text() or "") for pg in reader.pages[:10])
+        # pypdf sometimes puts a space where the font or kerning changes: "go .trailbio.com", "𝗣 aym 𝗲 nt"
+        for _ in range(3):
+            text = re.sub(r"((?:@|://)[^\s<>]*?)[ \t]+(\.[A-Za-z])", r"\1\2", text)
+    if not text.strip() and reader is None and not shutil.which("pdftotext"):
+        raise LookupError("Reading PDFs needs pypdf (pip install pypdf) or the pdftotext program")
+    return text, links
+
+
+def hidden_links(links: list[str], body: str, limit: int = 6) -> list[str]:
+    """Web links behind buttons that aren't already written out in the text (one per page, tracking #fragments ignored)."""
+    seen, out = set(), []
+    for u in links:
+        u = u.strip()
+        if not re.match(r"(?i)^https?://", u) or re.match(r"(?i)^https?://mail\.google\.com/", u):
+            continue
+        key = u.split("#", 1)[0].rstrip("/").lower()
+        if key in seen or key in body.lower():
+            continue
+        seen.add(key)
+        out.append(u[:300])
+    return out[:limit]
 
 
 _ADDR_IN_LINE = re.compile(r"([^<>\n]*?<\s*[^<>@\s]+@[^<>\s]+\s*>)")
+_MSG_COUNT = re.compile(r"(?i)^\d+ messages?$")
+_DATE_COLUMN = re.compile(r"(?i)(?<=\S)\s{2,}(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*,? \w+ \d{1,2},?(?: \d{4})?(?: at)?(?: \d{1,2}:\d{2}.*)?"
+                          r"|\d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?(?: \(.*\))?)\s*$")
+_MAIL_DATE = re.compile(r"(?i)^(?:(?:mon|tue|wed|thu|fri|sat|sun)\w*,? \w+ \d{1,2},? \d{4}(?: at)?(?: \d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?)?|\d{1,2}:\d{2}(?:\s?[ap]\.?m\.?)?)$")
+
+
+def _fix_styled_name(name: str) -> str:
+    """'𝗣aym 𝗲nt' (a PDF reader split a word where the font changed) → '𝗣aym𝗲nt'."""
+    if not re.search(f"[{_STYLED}]", name):
+        return name
+    name = re.sub(f"(^|[\\sa-z])([{_STYLED}]) (?=[a-z])", r"\1\2", name)  # a lone fancy letter cut off from its word
+    return re.sub(f"(?<=[a-z]) (?=[{_STYLED}][a-z]?)", "", name)
 
 
 def parse_mail_print(text: str) -> dict | None:
     """Email printed to PDF from Gmail / Outlook: subject, then 'Name <addr>  date', Reply-to:, To:, body."""
     lines = [ln.rstrip() for ln in (text or "").splitlines()]
-    for i, ln in enumerate(lines[:25]):
+    for n in range(min(len(lines), 30)):  # the date printed in a column to the right of the sender
+        lines[n] = _DATE_COLUMN.sub("", lines[n])
+    for n in range(min(len(lines), 30) - 1):  # "Name <you.1234@long-domain-" + "name.example>": a long address wrapped
+        if re.search(r"<[^<>\s]*@[^<>\s]*$", lines[n]) and re.match(r"^\s*[^\s<>]*>", lines[n + 1]):
+            lines[n] += lines[n + 1].strip().split(">", 1)[0] + ">"
+            lines[n + 1] = lines[n + 1].strip().split(">", 1)[1]
+    recipient = ""
+    gmail_at = next((n for n, ln in enumerate(lines[:6]) if re.match(r"(?i)^\s*gmail\b", ln)), -1)
+    for i, ln in enumerate(lines[:30]):
         m = _ADDR_IN_LINE.search(ln.strip())
         if not m or re.match(r"(?i)\s*(?:to|cc|bcc|reply-to)\s*:", ln):
             continue
+        if i == gmail_at:  # "Gmail      Your Name <you@gmail.com>": the account the email was printed from
+            recipient = re.sub(r"(?i)^\s*gmail\s*", "", m.group(1)).strip()
+            continue
         sender = re.sub(r"(?i)^\s*from:\s*", "", m.group(1)).strip()
+        sender = _fix_styled_name(re.sub(r"\s{2,}", " ", sender))
         subject = ""
-        for prev in reversed(lines[:i]):
-            p = prev.strip()
-            if p and not re.match(r"(?i)^(?:\d+ messages?|gmail\b.*|outlook\b.*|inbox|print)$", p) and "@" not in p:
-                subject = p
-                break
-        reply_to, j = "", i + 1
-        while j < len(lines) and (not lines[j].strip() or re.match(r"(?i)\s*(?:reply-to|to|cc|bcc|date|sent|subject)\s*:", lines[j])):
+        count_at = next((n for n in range(i - 1, -1, -1) if _MSG_COUNT.match(lines[n].strip())), -1)
+        if gmail_at >= 0 and count_at > gmail_at:  # Gmail prints the whole subject (it may wrap) above "1 message"
+            subject = re.sub(r"(?<=-) (?=\w)", "", " ".join(lines[n].strip() for n in range(gmail_at + 1, count_at)
+                                                         if lines[n].strip() and not _ADDR_IN_LINE.search(lines[n])))
+        if not subject:
+            for prev in reversed(lines[:i]):
+                p = prev.strip()
+                if p and not re.match(r"(?i)^(?:\d+ messages?|gmail\b.*|outlook\b.*|inbox|print)$", p) and "@" not in p:
+                    subject = p
+                    break
+        reply_to, to, j = "", "", i + 1
+        while j < len(lines) and (not lines[j].strip() or re.match(r"(?i)\s*(?:reply-to|to|cc|bcc|date|sent|subject)\s*:", lines[j])
+                                  or _MAIL_DATE.match(lines[j].strip())):
             rm = re.match(r"(?i)\s*reply-to\s*:\s*(.+)$", lines[j])
             if rm:
                 reply_to = rm.group(1).strip()
+            tm = re.match(r"(?i)\s*to\s*:\s*(.+)$", lines[j])
+            if tm and not to:
+                to = tm.group(1).strip()
             sm = re.match(r"(?i)\s*subject\s*:\s*(.+)$", lines[j])
             if sm and not subject:
                 subject = sm.group(1).strip()
             j += 1
         body = re.sub(r"[ \t]+", " ", "\n".join(ln.strip() for ln in lines[j:])).strip()
         body = re.sub(r"\n{3,}", "\n\n", body)
-        return {"mode": "email", "sender": sender[:200], "subject": subject[:300], "body": body[:5000],
-                "headers": {"reply_to": reply_to} if reply_to else None}
+        to = to or recipient
+        headers = {k: v[:200] for k, v in (("reply_to", reply_to), ("to", to)) if v}
+        return {"mode": "email", "sender": sender[:200], "subject": re.sub(r"\s+", " ", subject)[:300], "body": body[:5000],
+                "headers": headers or None}
     return None
 
 
@@ -435,7 +518,7 @@ def parse_eml(data: bytes) -> dict:
         body = _html.unescape(body)
     body = re.sub(r"[ \t]+", " ", body).strip()
     auth = " ; ".join(str(v) for v in (msg.get_all("Authentication-Results") or msg.get_all("ARC-Authentication-Results") or []))
-    headers = {"reply_to": str(msg.get("Reply-To") or ""), "auth": auth[:2000]}
+    headers = {"reply_to": str(msg.get("Reply-To") or ""), "to": str(msg.get("To") or "")[:200], "auth": auth[:2000]}
     return {"engine": "Email file", "mode": "email", "sender": str(msg.get("From") or "")[:200],
             "subject": str(msg.get("Subject") or "")[:300], "body": body[:5000], "app": "Email file (.eml)",
             "headers": {k: v for k, v in headers.items() if v} or None, "readable": bool(body or msg.get("From")),
@@ -461,10 +544,16 @@ def read_file(data: bytes, filename: str = "") -> dict:
     if audio or name.endswith((".m4a", ".mp3", ".wav", ".amr", ".aac", ".ogg", ".opus", ".flac", ".caf", ".3gp")):
         return transcribe_audio(data, audio or "audio/mp4")
     if data.startswith(b"%PDF"):
-        text = _pdf_text(data)
+        text, links = _pdf_text(data)
+        text = clean_pdf_text(text)
         if len(text.strip()) < 20:
             raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
         parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
+        extra = hidden_links(links, parsed["body"])
+        if extra:  # the real web addresses behind "Click here" / "Update payment" buttons
+            label = "Links in this email" if parsed["mode"] == "email" else "Links in this document"
+            tail = f"\n\n{label}:\n" + "\n".join(extra)
+            parsed = {**parsed, "body": parsed["body"][:5000 - len(tail)] + tail}
         return {**parsed, "engine": "PDF text", "app": "PDF", "readable": bool(parsed["body"]),
                 "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": []}
     if name.endswith(".eml") or _looks_like_eml(data):

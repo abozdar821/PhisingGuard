@@ -1,0 +1,30 @@
+// The phone version's PDF reader (pdf.js) on Gmail-style printed PDFs. Needs: npm install --no-save pdfjs-dist@3.11.174
+const fs = require("fs"), path = require("path");
+const lib = require("pdfjs-dist/legacy/build/pdf.js");
+global.window = global; global.pdfjsLib = lib;
+global.document = { createElement() { return {}; }, head: { appendChild() {} } };
+eval(fs.readFileSync(path.join(__dirname, "filetext.js"), "utf8"));
+const { createEngine } = require("./engine.js");
+const E = createEngine(require("./engine_data.json"), {});
+const FT = global.FileText, FILES = path.join(__dirname, "..", "tests", "files");
+let bad = 0;
+const check = (name, ok, info) => { console.log((ok ? "PASS " : "FAIL ") + name + (ok ? "" : " " + JSON.stringify(info).slice(0, 300))); if (!ok) bad++; };
+const read = async f => { const b = fs.readFileSync(path.join(FILES, f)); return FT.parsePdf(await FT.pdfRead(b.buffer.slice(b.byteOffset, b.byteOffset + b.length))); };
+(async () => {
+  let x = await read("gmail_cloud_scam.pdf");
+  check("fancy-letter sender kept whole (wrapped address rejoined)", x.sender === "𝗣aym𝗲nt_Declin𝗲d <jlee4817.mail.5804@ycmoggbfves.event-manager.hiartomaro.my.id>", x.sender);
+  check("wrapped subject read in full", x.subject.startsWith("jlee4817.mail, Your Cloud Account has been locked on 10-20-2026.") && x.subject.includes("removed!"), x.subject);
+  check("recipient captured from To:", x.headers && x.headers.to === "jlee4817.mail@gmail.com", x.headers);
+  check("ligatures undone (ﬁ → fi)", x.body.includes("files are safe") && x.body.includes("official website") && !x.body.includes("ﬁ"), x.body.slice(0, 300));
+  check("link hidden behind the button is added", x.body.includes("Links in this email:\nhttps://storage.googleapis.com/betweenthemiseasy/trustedbycommunities.html"), x.body.slice(-300));
+  let s = E.scan(x.mode, x.sender, x.subject, x.body, x.headers);
+  check("fake cloud storage email → Likely scam, billing", s.score >= 55 && s.category === "Billing / subscription scam", [s.score, s.category]);
+  x = await read("gmail_trailhead_receipt.pdf");
+  s = E.scan(x.mode, x.sender, x.subject, x.body, x.headers);
+  check("genuine receipt with long tracking links stays safe", x.sender === "Trailhead Biosystems <hello@trailbio.com>" && s.score < 30, [x.sender, s.score, s.flags.map(f => f.text)]);
+  x = await read("paypal_print.pdf");
+  s = E.scan(x.mode, x.sender, x.subject, x.body, x.headers);
+  check("printed PayPal phishing email → Likely scam", s.score >= 55, [x.sender, s.score, s.category]);
+  console.log(bad ? `${bad} PDF check(s) failed` : "phone PDF reader: all checks passed");
+  process.exit(bad ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });
