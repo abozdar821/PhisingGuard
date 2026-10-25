@@ -412,6 +412,56 @@ check("fancy letters are read as plain text by the rules", m.fold_styled("𝗣ay
 check("a 'Daily Messenger' newspaper isn't called a Messenger impersonation",
       c.post("/api/phishguard/scan", json={"mode": "email", "sender": "The Daily Messenger <news@dailymessenger.com>", "subject": "Headlines", "body": "Today's news."}).json["score"] < 30)
 print(f"\n{len(fails)} failures (after Gmail-PDF checks)", fails)
+# ── Gemini backup assistant: Google Search grounding + Safe Browsing with the same Google key ──
+class _G:
+    def __init__(self, status, body): self.status_code, self._b = status, body
+    def json(self): return self._b
+seen = []
+def google(url, **kw):
+    seen.append((url, kw))
+    if "generativelanguage" in url:
+        if kw["json"].get("tools") == [{"google_search": {}}]:
+            return _G(200, {"candidates": [{"content": {"parts": [{"text": 'Found reports. {"score": 90, "verdict": "scam", "reasoning": "Scam forums report this site.", "red_flags": ["reported"]}'}]},
+                    "groundingMetadata": {"webSearchQueries": ["pluzovolee.my scam"], "groundingChunks": [{"web": {"uri": "https://vertexaisearch.cloud.google.com/r/1", "title": "reddit.com"}}]}}]})
+        return _G(200, {"candidates": [{"content": {"parts": [{"text": '{"score": 70, "verdict": "scam", "reasoning": "plain", "red_flags": []}'}]}}]})
+    if "safebrowsing" in url:
+        ents = [e["url"] for e in kw["json"]["threatInfo"]["threatEntries"]]
+        return _G(200, {"matches": [{"threat": {"url": u}, "threatType": "SOCIAL_ENGINEERING"} for u in ents if "betweenthemiseasy" in u]})
+    raise OSError("unexpected " + url)
+m.GEMINI_API_KEY, m.LOOKUPS, m._sb_off_until = "AQ.test-key", True, 0.0
+with mock.patch.object(m._requests, "post", side_effect=google):
+    m._rate.clear()
+    r = c.post("/api/phishguard/scan", json={"mode": "email", "sender": "Messenger <jlee4817.mail.77@pluzovolee.my>", "subject": "New request",
+                                             "body": "You have 1 new message request. Open: https://storage.googleapis.com/betweenthemiseasy/x.html"}).json
+gem = [kw for u, kw in seen if "generativelanguage" in u]
+sbr = [(u, kw) for u, kw in seen if "safebrowsing" in u]
+op = next((o for o in r["ai"] if o["provider"] == "Gemini"), {})
+check("Gemini opinion uses Google Search and shows what it checked", op.get("score") == 90 and op.get("sources") == [{"title": "reddit.com", "url": "https://vertexaisearch.cloud.google.com/r/1"}]
+      and op.get("searched") == ["pluzovolee.my scam"], op)
+user_text = gem[0]["json"]["contents"][0]["parts"][0]["text"] if gem else ""
+check("Gemini is asked to look up the sender's domain and link sites, not the recipient's address",
+      "<lookups>pluzovolee.my, storage.googleapis.com</lookups>" in user_text and "jlee4817" not in user_text.split("<lookups>")[1], user_text[-200:])
+check("API key sent in a header, never in the URL", all("key=" not in u and kw["headers"].get("x-goog-api-key") == "AQ.test-key" for u, kw in [(u, kw) for u, kw in seen]))
+check("Safe Browsing runs with the Gemini key and checks free-hosted pages too",
+      bool(sbr) and r["category"] == "Known dangerous link" and any("Google Safe Browsing lists this link" in f["text"] for f in r["flags"]), (len(sbr), r["category"]))
+seen.clear()
+def no_search(url, **kw):
+    if "generativelanguage" in url and kw["json"].get("tools"):
+        return _G(400, {"error": {"message": "Search Grounding is not supported."}})
+    if "safebrowsing" in url:
+        return _G(403, {"error": {"message": "Safe Browsing API has not been used in project"}})
+    return google(url, **kw)
+with mock.patch.object(m._requests, "post", side_effect=no_search):
+    m._rate.clear()
+    r = c.post("/api/phishguard/scan", json={"mode": "sms", "sender": "", "body": "Pay the toll: https://storage.googleapis.com/other/pay.html"}).json
+op = next((o for o in r["ai"] if o["provider"] == "Gemini"), {})
+check("without Google Search access Gemini still answers (plain JSON mode)", op.get("score") == 70 and "sources" not in op, op)
+check("a key that can't use Safe Browsing is rested instead of retried on every scan", m._sb_off_until > time.time() and m._sb_key() == "", m._sb_off_until)
+cfg = c.get("/api/phishguard/config").json
+check("config reports Gemini's Google Search", cfg.get("ai_search") is True, cfg.get("ai_search"))
+m.GEMINI_API_KEY, m.LOOKUPS, m._sb_off_until = "", False, 0.0
+print(f"\n{len(fails)} failures (after Gemini checks)", fails)
+
 # ── private .env settings file ──
 import shutil as _shutil
 _d = tempfile.mkdtemp()

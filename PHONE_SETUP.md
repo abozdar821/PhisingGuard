@@ -36,6 +36,14 @@ Open `http://127.0.0.1:5001` on the computer to check it works. Then choose how 
 
 - **Claude:** `ANTHROPIC_API_KEY=sk-ant-… python phishguard.py`
 - **Gemini:** `GEMINI_API_KEY=… python phishguard.py`
+- **Gemini as a backup assistant (with Google's scam data):** with `GEMINI_API_KEY` set, Gemini gives a second opinion on
+  every check and uses Google Search to look up the sender's domain, link websites and phone numbers for public scam reports
+  (its sources are listed under its opinion; turn this off with `GEMINI_SEARCH=0`). The same key is also tried for
+  **Google Safe Browsing**, Google's list of phishing and malware sites. That works if the Safe Browsing API is enabled for the
+  key's Google Cloud project; otherwise set `GOOGLE_SAFE_BROWSING_KEY` separately, or PhishGuard quietly skips it.
+- **Gemini in the phone version:** open your PhishGuard website, go to **History → Gemini backup assistant** and paste your key.
+  It's stored only in that browser and gives Gemini's opinion (with Google Search), Gemini reading of screenshots, and Safe
+  Browsing link checks. This setting isn't shown when PhishGuard runs inside Claude, which already has Claude.
 - **Keep keys in a file instead:** create a file named `.env` in the same folder as `phishguard.py` with lines like
   `GEMINI_API_KEY=your-key` or `ANTHROPIC_API_KEY=sk-ant-…`, then just run `python phishguard.py`. The file is ignored by
   git, so it never reaches GitHub. Never put an API key in the phone (Vercel) version: that page is public.

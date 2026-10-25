@@ -775,17 +775,44 @@ function createEngine(D, env) {
       'Reply with ONLY a JSON object: {"score": 0-100, "verdict": "scam"|"suspicious"|"safe", "reasoning": "<=2 sentences", "red_flags": ["short", "..."]}\n' +
       `The message may be in any language. Write reasoning and red_flags in ${D.UI_LANGS[s.ui_lang] || "English"}.`;
   }
-  function addOpinion(id, raw) {
+  function addOpinion(id, raw, provider) {
     const s = scans.find(x => x.id === id); if (!s) return null;
     const wasFlagged = s.score >= 55;
-    const o = raw.error ? { provider: "Claude", model: "claude.ai", error: String(raw.error).slice(0, 200) } : {
-      provider: "Claude", model: "claude.ai", score: Math.max(0, Math.min(100, Math.round(Number(raw.score) || 0))),
+    provider = provider === "Gemini" ? "Gemini" : "Claude";
+    const model = provider === "Gemini" ? "gemini-flash-latest" : "claude.ai";
+    const o = raw.error ? { provider, model, error: String(raw.error).slice(0, 200) } : {
+      provider, model, score: Math.max(0, Math.min(100, Math.round(Number(raw.score) || 0))),
       verdict: String(raw.verdict || "").slice(0, 20), reasoning: String(raw.reasoning || "").slice(0, 500),
       red_flags: (Array.isArray(raw.red_flags) ? raw.red_flags : []).map(x => String(x).slice(0, 160)).slice(0, 6) };
-    s.ai = s.ai.filter(x => x.provider !== "Claude").concat([o]);
+    const src = (Array.isArray(raw.sources) ? raw.sources : []).filter(x => x && /^https:\/\//.test(String(x.url || "")))
+      .slice(0, 5).map(x => ({ title: String(x.title || "").slice(0, 120), url: String(x.url).slice(0, 500) }));
+    if (!raw.error && src.length) o.sources = src;
+    if (!raw.error && Array.isArray(raw.searched) && raw.searched.length) o.searched = raw.searched.slice(0, 4).map(x => String(x).slice(0, 120));
+    s.ai = s.ai.filter(x => x.provider !== provider).concat([o]);
     finalize(s);
     if (!wasFlagged && s.score >= 55) pgCounters.flagged++;
     if (wasFlagged && s.score < 55) pgCounters.flagged--;
+    return s;
+  }
+  function addLinkIntel(id, hits) {  // Google Safe Browsing results for a scan's links (same flags as the server's live check)
+    const s = scans.find(x => x.id === id); if (!s) return null;
+    const wasFlagged = s.score >= 55;
+    let add = 0;
+    s.link_checks = s.links.slice(0, 6).map(l => ({ url: l.url, final: l.url, hops: 0, age_days: null, listed: hits[l.url] || null }));
+    for (const c of s.link_checks) if (c.listed) {
+      const host = (s.links.find(l => l.url === c.url) || {}).host || c.url;
+      const text = `Google Safe Browsing lists this link as dangerous (${c.listed}): ${host}`;
+      if (!s.flags.some(f => f.text === text)) { s.flags.push({ module: "Live link check", points: 60, text }); add += 60; }
+    }
+    if (!add) return s;
+    s.modules["Live link check"] = (s.modules["Live link check"] || 0) + add;
+    s.heuristic_score = Math.min(100, s.heuristic_score + add);
+    s.hard = true;
+    if (s.category !== "Debt collection fraud") s.category = "Known dangerous link";
+    s.flags = s.flags.map((f, i) => [f, i]).sort((x, y) => y[0].points - x[0].points || x[1] - y[1]).map(([f]) => f);
+    finalize(s);
+    if (!wasFlagged && s.score >= 55) pgCounters.flagged++;
+    if (env.onScans) env.onScans();
     return s;
   }
   const pub = s => { const { sender_norm, hard, ...rest } = s; return rest; };
@@ -823,6 +850,7 @@ function createEngine(D, env) {
       case "/api/analyze": return clone(ingest(body));
       case "/api/phishguard/config":
         return { ai_enabled: !!env.aiAvailable, ai_providers: env.aiAvailable ? [{ name: "Claude", model: "claude.ai" }] : [], examples: clone(D.PG_EXAMPLES),
+                 ocr_engines: (env.ocrEngines || []).slice(),
                  bbb_cases: D.BBB_CASES.map(c => ({ id: c.id, business: c.business, url: c.url })) };
       case "/api/phishguard/scan": {
         const sender = String(body.sender || ""), subject = String(body.subject || ""), text = String(body.body || "");
@@ -876,7 +904,8 @@ function createEngine(D, env) {
     cap(scans, 300);
   }
   const kwLabel = k => (D.PATTERN_LABELS || {})[k] || k;
-  return { api, kwLabel, exportScans, importScans, ingest, scan, aiPrompt, addOpinion: (id, raw) => { const s = addOpinion(id, raw); return s && clone(pub(s)); },
+  return { api, kwLabel, exportScans, importScans, ingest, scan, aiPrompt, addOpinion: (id, raw, provider) => { const s = addOpinion(id, raw, provider); return s && clone(pub(s)); },
+    addLinkIntel: (id, hits) => { const s = addLinkIntel(id, hits); return s && clone(pub(s)); },
            state: S, store, RULE_COUNT, severityFor, extractLinks, normalizeSender };
 }
 if (typeof module !== "undefined" && module.exports) module.exports = { createEngine };

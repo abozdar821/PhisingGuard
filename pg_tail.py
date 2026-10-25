@@ -657,14 +657,30 @@ def _domain_age_days(dom: str):
     return _cached("age:" + dom, look)
 
 
+_sb_off_until = 0.0  # the Gemini key can't use Safe Browsing: stop asking for a while
+
+
+def _sb_key() -> str:
+    """GOOGLE_SAFE_BROWSING_KEY, or else the Gemini key (a Google Cloud key works for both if Safe Browsing is enabled on it)."""
+    if SAFE_BROWSING_KEY:
+        return SAFE_BROWSING_KEY
+    return GEMINI_API_KEY if GEMINI_API_KEY and time.time() >= _sb_off_until else ""
+
+
 def _safe_browsing(urls: list[str]) -> dict:
-    if not SAFE_BROWSING_KEY or not urls:
+    global _sb_off_until
+    key = _sb_key()
+    if not key or not urls:
         return {}
     try:
-        r = _requests.post("https://safebrowsing.googleapis.com/v4/threatMatches:find", params={"key": SAFE_BROWSING_KEY}, timeout=4,
+        r = _requests.post("https://safebrowsing.googleapis.com/v4/threatMatches:find", timeout=4,
+                           headers={"x-goog-api-key": key, "content-type": "application/json"},
                            json={"client": {"clientId": "phishguard", "clientVersion": "1.0"},
                                  "threatInfo": {"threatTypes": list(_SB_KINDS), "platformTypes": ["ANY_PLATFORM"],
-                                                "threatEntryTypes": ["URL"], "threatEntries": [{"url": u} for u in urls]}})
+                                                "threatEntryTypes": ["URL"], "threatEntries": [{"url": u} for u in urls[:20]]}})
+        if r.status_code in (400, 401, 403) and key != SAFE_BROWSING_KEY:
+            _sb_off_until = time.time() + 6 * 3600
+            return {}
         return {mt["threat"]["url"]: _SB_KINDS.get(mt.get("threatType"), "dangerous") for mt in (r.json().get("matches") or [])}
     except Exception:
         return {}
@@ -679,7 +695,7 @@ def link_intel(links: list[dict], mode: str):
     if not LOOKUPS:
         return None
     todo = [ln for ln in links[:4] if not _trusted_domain(ln["domain"]) or ln["domain"] in PG_SHORTENERS]
-    if not todo:
+    if not todo and not (links and _sb_key()):  # free-hosted pages still go to Safe Browsing
         return None
     follow_all = FOLLOW_LINKS or mode == "link"
     sc, fl, checks, finals, listed = 0, [], [], [], False
@@ -719,7 +735,10 @@ def link_intel(links: list[dict], mode: str):
             sc += 10; fl.append((10, f"Website is less than 6 months old ({age} days): {dom}"))
     for c in checks:
         c["age_days"] = next((a for d, a in ages.items() if d == _registered_domain((urlparse(c["final"]).hostname or ""))), None)
-    hits = _safe_browsing([c["final"] for c in checks] + [c["url"] for c in checks])
+    seen = {c["url"] for c in checks}
+    checks += [{"url": ln["url"], "final": ln["url"], "hops": 0, "age_days": None, "listed": None}
+               for ln in links[:6] if ln["url"] not in seen]
+    hits = _safe_browsing(list(dict.fromkeys([c["final"] for c in checks] + [c["url"] for c in checks])))
     for c in checks:
         kind = hits.get(c["final"]) or hits.get(c["url"])
         if kind:
@@ -874,7 +893,8 @@ def pg_config():
                     "ai_providers": [{"name": p["name"], "model": p["model"]} for p in ai_providers()],
                     "ocr_engines": ocr_engines(), "transcribers": _transcribers(), "examples": PG_EXAMPLES,
                     "link_checks": ({"expand": True, "follow_all": FOLLOW_LINKS, "domain_age": True,
-                                     "safe_browsing": bool(SAFE_BROWSING_KEY)} if LOOKUPS else None),
+                                     "safe_browsing": bool(_sb_key())} if LOOKUPS else None),
+                    "ai_search": bool(GEMINI_API_KEY and GEMINI_SEARCH),
                     "bbb_cases": [{"id": c["id"], "business": c["business"], "url": c["url"]} for c in BBB_CASES]})
 
 

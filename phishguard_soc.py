@@ -736,6 +736,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 PG_MODEL = os.environ.get("PHISHGUARD_MODEL", "claude-haiku-4-5-20251001")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")  # alias tracks Google's current Flash model
+GEMINI_SEARCH = os.environ.get("GEMINI_SEARCH", "1") != "0"  # let Gemini check Google Search for public scam reports
 
 BBB_CASES = [{
     "id": "1308291", "type": "Debt collections", "business": "Harris & Harris",
@@ -1822,7 +1823,22 @@ def _ai_prompt(scan: dict) -> tuple[str, str]:
         f"The message may be in any language. Write reasoning and red_flags in {UI_LANGS.get(scan.get('ui_lang', 'en'), 'English')}.")
     user = (f"<message type=\"{scan['mode']}\">\nSender: {scan['sender']}\nSubject: {scan['subject']}\n"
             f"Body:\n{scan['body'][:4000]}\n</message>\nRule-engine score: {scan['heuristic_score']}/100.")
+    look = _lookups(scan)
+    if look:
+        user += f"\n<lookups>{look}</lookups>"
     return system, user
+
+
+def _lookups(scan: dict) -> str:
+    """What is worth looking up for public scam reports: the sender's domain or number, link sites, phone numbers.
+    Only the domain of an email sender, never the address itself (it can contain the recipient's own name)."""
+    sn, out = scan.get("sender_norm") or {}, []
+    if sn.get("kind") == "email" and sn.get("domain") not in FREEMAIL:
+        out.append(sn["domain"])
+    elif sn.get("kind") == "phone":
+        out.append(sn["value"])
+    out += [ln["host"] for ln in (scan.get("links") or [])[:4]] + list(scan.get("phones") or [])[:3]
+    return ", ".join(dict.fromkeys(x for x in out if x))[:400]
 
 
 def _ask_claude(system: str, user: str) -> str:
@@ -1836,15 +1852,24 @@ def _ask_claude(system: str, user: str) -> str:
     return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 
-def _ask_gemini(system: str, user: str) -> str:
+_GEMINI_SEARCH_NOTE = (
+    "\nYou can use Google Search. Look up the items under <lookups> (sender domain or number, link websites, phone numbers) "
+    "for public scam or phishing reports, e.g. FTC, BBB Scam Tracker, news, forums and scam-report sites, and say briefly in the "
+    "reasoning what you found (or that you found nothing). Never search for the recipient's own name, email address or other "
+    "personal details from the message.")
+
+
+def _gemini_call(system: str, user: str, search: bool) -> tuple[str, list[dict], list[str]]:
+    config = {"temperature": 0, "maxOutputTokens": 2048}
+    body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": config}
+    if search:
+        body["tools"] = [{"google_search": {}}]  # grounding with Google Search (JSON mode can't be combined with it)
+    else:
+        config["responseMimeType"] = "application/json"
     # Key goes in a header (not the URL) so it never appears in logs or error messages.
-    r = _requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent", timeout=25,
-        headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"},
-        json={"systemInstruction": {"parts": [{"text": system}]},
-              "contents": [{"role": "user", "parts": [{"text": user}]}],
-              "generationConfig": {"temperature": 0, "maxOutputTokens": 2048,
-                                   "responseMimeType": "application/json"}})
+    r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent", timeout=40 if search else 25,
+                       headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"}, json=body)
     data = r.json()
     if r.status_code != 200:
         raise ValueError((data.get("error") or {}).get("message", f"HTTP {r.status_code}"))
@@ -1858,7 +1883,24 @@ def _ask_gemini(system: str, user: str) -> str:
     text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
     if not text:
         raise ValueError(f"empty Gemini response (finishReason {cands[0].get('finishReason', '?')})")
-    return text
+    meta = cands[0].get("groundingMetadata") or {}
+    sources = []
+    for ch in meta.get("groundingChunks") or []:
+        web = ch.get("web") or {}
+        if str(web.get("uri", "")).startswith("https://") and web["uri"] not in {x["url"] for x in sources}:
+            sources.append({"title": str(web.get("title") or "")[:120], "url": web["uri"][:500]})
+    return text, sources[:5], [str(q)[:120] for q in (meta.get("webSearchQueries") or [])][:4]
+
+
+def _ask_gemini(system: str, user: str):
+    """Gemini's opinion, checked against Google Search when allowed; plain Gemini if search grounding isn't available."""
+    if GEMINI_SEARCH:
+        try:
+            text, sources, queries = _gemini_call(system + _GEMINI_SEARCH_NOTE, user, True)
+            return {"text": text, "sources": sources, "searched": queries}
+        except Exception:
+            pass  # e.g. the model or key can't use Google Search: answer without it
+    return _gemini_call(system, user, False)[0]
 
 
 def ai_providers() -> list[dict]:
@@ -1874,11 +1916,16 @@ def ai_providers() -> list[dict]:
 def _opinion(provider: dict, system: str, user: str) -> dict:
     base = {"provider": provider["name"], "model": provider["model"]}
     try:
-        m = re.search(r"\{.*\}", provider["ask"](system, user) or "", re.S)
+        reply = provider["ask"](system, user) or ""
+        extra = {}
+        if isinstance(reply, dict):  # Gemini with Google Search: also report what it looked at
+            extra = {k: reply[k] for k in ("sources", "searched") if reply.get(k)}
+            reply = reply.get("text") or ""
+        m = re.search(r"\{.*\}", reply, re.S)
         if not m:
             raise ValueError("model reply contained no JSON")
         obj = json.loads(m.group(0))
-        return {**base, "score": max(0, min(100, int(float(obj.get("score", 0))))),
+        return {**base, **extra, "score": max(0, min(100, int(float(obj.get("score", 0))))),
                 "verdict": str(obj.get("verdict", ""))[:20], "reasoning": str(obj.get("reasoning", ""))[:500],
                 "red_flags": [str(x)[:160] for x in (obj.get("red_flags") or [])][:6]}
     except Exception as exc:  # network, auth, safety block, malformed output — never break the scan
