@@ -462,6 +462,40 @@ check("config reports Gemini's Google Search", cfg.get("ai_search") is True, cfg
 m.GEMINI_API_KEY, m.LOOKUPS, m._sb_off_until = "", False, 0.0
 print(f"\n{len(fails)} failures (after Gemini checks)", fails)
 
+# ── WhatsApp chats: exported .txt / iPhone .zip, shared text ──
+import zipfile as _zf
+WA_IOS = ("[10/20/26, 3:41:02 PM] Jordan Lee: \u200eMessages and calls are end-to-end encrypted.\n"
+          "[10/20/26, 3:41:05 PM] +1 (213) 555-0187: Hello dear, I am Linda from the recruitment team\n"
+          "[10/20/26, 3:41:30 PM] +1 (213) 555-0187: Remote part time job, earn $300-$800 daily just liking videos\n"
+          "[10/20/26, 3:42:10 PM] Jordan Lee: who is this? is this a scam\n"
+          "[10/20/26, 3:43:00 PM] +1 (213) 555-0187: \u200eimage omitted\n"
+          "[10/20/26, 3:44:00 PM] +1 (213) 555-0187: Contact our receptionist on Telegram: https://t.me/amz_task_hr\nSend your name and age\n")
+j = fup("WhatsApp Chat with +1 (213) 555-0187.txt", WA_IOS.encode()).json
+x = j["extracted"]
+check("WhatsApp export (.txt): sender is the other person", x["sender"] == "+1 (213) 555-0187" and x["engine"] == "WhatsApp chat export", x.get("sender"))
+check("…only their messages, without your replies, times or media notes",
+      "who is this" not in x["body"] and "3:41" not in x["body"] and "omitted" not in x["body"] and "Send your name and age" in x["body"]
+      and x["chat"] == {"with": "+1 (213) 555-0187", "count": 3, "group": False, "people": 2}, x["body"])
+check("…task scam caught", j["scan"]["score"] >= 55 and j["scan"]["category"] == "Job / recruitment scam", (j["scan"]["score"], j["scan"]["category"]))
+buf = io.BytesIO()
+with _zf.ZipFile(buf, "w", _zf.ZIP_DEFLATED) as z:
+    z.writestr("_chat.txt", WA_IOS); z.writestr("00000003-PHOTO-2026-10-20.jpg", b"\xff\xd8\xff")
+j = fup("WhatsApp Chat - +1 (213) 555-0187.zip", buf.getvalue()).json
+check("WhatsApp export (iPhone .zip) read and checked", j["extracted"]["sender"] == "+1 (213) 555-0187" and j["scan"]["score"] >= 55, j.get("extracted", {}).get("sender"))
+buf = io.BytesIO()
+with _zf.ZipFile(buf, "w") as z:
+    z.writestr("photo.jpg", b"x")
+r = fup("random.zip", buf.getvalue())
+check("a .zip without a chat is refused with a clear message", r.status_code in (200, 422) and "WhatsApp" in json.dumps(r.json), r.json)
+m._rate.clear()
+r = c.post("/share", data={"text": "[10/20, 3:41 PM] +44 7700 900123: Hi mum, I dropped my phone, this is my new number\n"
+                                   "[10/20, 3:44 PM] +44 7700 900123: Can you transfer £480 to pay a bill urgently?"})
+sid = r.headers.get("Location", "").split("#scan=")[-1]
+s2 = c.get("/api/phishguard/scans/" + sid).json if sid else {}
+check("WhatsApp messages shared as text → the other person's messages are checked", s2.get("category") == "Family-emergency scam" and s2.get("score", 0) >= 55, (s2.get("score"), s2.get("category")))
+check("plain text with a time in it isn't mistaken for a chat", not m.looks_like_whatsapp("Meeting moved to 3:30 PM: bring the slides\nThanks"))
+print(f"\n{len(fails)} failures (after WhatsApp checks)", fails)
+
 # ── private .env settings file ──
 import shutil as _shutil
 _d = tempfile.mkdtemp()

@@ -127,6 +127,68 @@ function parsePlain(text) {
   }
   return {mode: sender.includes("@") ? "email" : "sms", sender, subject, body: keep.join("\n").replace(/[ \t]+/g, " ").trim().slice(0, 5000), headers: null};
 }
+/* ── WhatsApp "Export chat" files: .txt (Android) or a .zip holding _chat.txt (iPhone) — same rules as the server ── */
+const WA_STAMP = /^\[?(\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?),?\s+(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s?[ap]\.?\s?m\.?)?)\]?\s*(?:[-–]\s+)?/i;
+const WA_SENDER = /^([^:\n]{1,60}?):\s/;
+const WA_SKIP = /^(?:<media omitted>|<attached: [^>]*>|(?:image|video|audio|sticker|gif|document|contact card|photo) omitted|this message was deleted|you deleted this message|missed (?:voice|video) call.*|null|waiting for this message.*)$/i;
+const WA_TITLE = /whatsapp chat (?:with|-)\s*(.+?)(?:\.(?:txt|zip))?$/i;
+const waClean = l => l.replace(/[‎‏]/g, "").replace(/[  ]/g, " ").replace(/\s+$/, "");
+function looksLikeWhatsApp(text) {
+  const lines = String(text || "").split(/\r?\n/).filter(l => l.trim()).slice(0, 40).map(waClean);
+  const hits = lines.filter(l => { const m = WA_STAMP.exec(l); return m && WA_SENDER.test(l.slice(m[0].length)); }).length;
+  return hits >= 2 || (hits === 1 && lines.length <= 3);
+}
+function parseWhatsApp(text, filename) {
+  let msgs = [];
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const l = waClean(raw), m = WA_STAMP.exec(l);
+    if (m) { const rest = l.slice(m[0].length), who = WA_SENDER.exec(rest); msgs.push(who ? [who[1].trim(), rest.slice(who[0].length)] : ["", ""]); }
+    else if (msgs.length && l.trim()) msgs[msgs.length - 1][1] += "\n" + l.trim();
+  }
+  msgs = msgs.filter(([w]) => w).map(([w, t]) => [w, t.replace(/\s*<this message was edited>\s*$/i, "").trim()]).filter(([, t]) => t && !WA_SKIP.test(t));
+  const people = [...new Set(msgs.map(([w]) => w))];
+  const title = ((WA_TITLE.exec(String(filename || "").split(/[\\/]/).pop()) || [])[1] || "").trim();
+  const phone = /^\+?[\d\s().-]{7,}$/;
+  const other = people.includes(title) ? title
+    : people.length === 2 && people.filter(p => phone.test(p)).length === 1 ? people.find(p => phone.test(p)) : (people[0] || "");
+  const group = people.length > 2;
+  const keep = group ? msgs.map(([w, t]) => `${w}: ${t}`) : msgs.filter(([w]) => w === other).map(([, t]) => t);
+  let body = keep.join("\n\n");
+  if (body.length > 5000) body = body.slice(0, 2400) + "\n…\n" + body.slice(-2400);
+  body = body.trim();
+  const note = group ? `WhatsApp group chat: ${msgs.length} messages from ${people.length} people checked`
+    : other ? `WhatsApp chat with ${other}: ${keep.length} of their messages checked (your replies are left out)` : "";
+  return {mode: "sms", sender: (group ? title : other).slice(0, 200), subject: "", body, headers: null,
+          engine: "WhatsApp chat export", app: "WhatsApp", readable: !!body,
+          notes: body ? note : "No messages found in that WhatsApp chat export.",
+          chat: {with: group ? title : other, count: keep.length, group, people: people.length}};
+}
+async function unzipChat(buf) {  // the chat text inside a WhatsApp export .zip, read with the browser's own inflater
+  const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) return null;
+  const entries = [];
+  let p = dv.getUint32(eocd + 16, true);
+  for (let k = 0, n = dv.getUint16(eocd + 10, true); k < n && p + 46 <= u8.length; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    entries.push({name: new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl)), method: dv.getUint16(p + 10, true),
+                  csize: dv.getUint32(p + 20, true), usize: dv.getUint32(p + 24, true), off: dv.getUint32(p + 42, true)});
+    p += 46 + nl + el + cl;
+  }
+  const txt = entries.filter(x => /\.txt$/i.test(x.name) && x.usize < 8e6);
+  const pick = txt.find(x => /_chat\.txt$/i.test(x.name)) || txt.find(x => /whatsapp/i.test(x.name)) || (txt.length === 1 ? txt[0] : null);
+  if (!pick || dv.getUint32(pick.off, true) !== 0x04034b50) return null;
+  const start = pick.off + 30 + dv.getUint16(pick.off + 26, true) + dv.getUint16(pick.off + 28, true);
+  const data = u8.slice(start, start + pick.csize);
+  let out;
+  if (pick.method === 0) out = data;
+  else if (pick.method === 8 && typeof DecompressionStream !== "undefined")
+    out = new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+  else return null;
+  return {text: new TextDecoder("utf-8").decode(out), name: pick.name};
+}
 let pdfjsPromise = null;
 const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 function loadPdfJs() {
@@ -309,5 +371,5 @@ async function ocrImage(blob, uiLang) {
   const {data} = await watchdog(worker.recognize(await screenCanvas(blob)), 30000, "Reading the screenshot took too long. Try a smaller screenshot, or paste the text instead.");
   return parseScreen(data.text || "");
 }
-root.FileText = {parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, pdfRead, parsePdf, cleanPdfText, hiddenLinks, parseScreen, ocrImage};
+root.FileText = {looksLikeWhatsApp, parseWhatsApp, unzipChat, parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, pdfRead, parsePdf, cleanPdfText, hiddenLinks, parseScreen, ocrImage};
 })(typeof window !== "undefined" ? window : globalThis);
