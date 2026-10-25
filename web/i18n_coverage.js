@@ -17,14 +17,18 @@ for (const r of ref.messages) {
 Object.keys(D.PG_ACTIONS).forEach(k => { texts.add(k); D.PG_ACTIONS[k].forEach(a => texts.add(a)); });
 Object.values(D.PG_DEFAULT_ACTIONS).forEach(v => v.forEach(a => texts.add(a)));
 Object.values(D.LANG_NAMES).forEach(n => texts.add(n));
+Object.values(D.PG_REPORTING || {}).forEach(c => { texts.add(c.name); c.items.forEach(i => { texts.add(i.name); texts.add(i.what); }); });
 ["Insurance marketing spam", "Adult / romance spam", "Previously confirmed scam", "Suspicious message", "critical", "high", "medium", "low", "info"].forEach(x => texts.add(x));
 ["Short link really goes to parcel-fee.top", "Short link leads to a well-known site: www.youtube.com", "Link passes through 4 redirects before landing on x.top", "Website is only 5 days old: x.top",
  "Website is less than 6 months old (90 days): x.top", "Google Safe Browsing lists this link as dangerous (phishing): x.top", "Live link check",
  "Known dangerous link"].forEach(x => texts.add(x));  // live checks run only on the server, so they're listed here
+// proper names that are written the same way in that language
+const NAMES = ["FTC: ReportFraud.ftc.gov", "ReportCyber (cyber.gov.au)"];
+const SAME = {es: new Set([...NAMES, "India", "Australia", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group"]), ur: new Set(NAMES), hi: new Set(NAMES)};
 let bad = 0;
 for (const code of ["es", "ur", "hi"]) {
   I.set(code);
-  for (const x of texts) if (I.tr(x) === x) { bad++; console.log(`[${code}] untranslated:`, x); }
+  for (const x of texts) if (I.tr(x) === x && !SAME[code].has(x)) { bad++; console.log(`[${code}] untranslated:`, x); }
 }
 I.set("ur"); console.log("sample:", I.tr("Asks you to share a code or PIN (Spanish)"), "|", I.tr("Contains 2 link(s) — unsolicited texts rarely need one"));
 I.set("es"); console.log("sample:", I.tr("Check with Trailhead Biosystems directly: call 216-445-3835 or email info@trailbio.com. Use contact details you find yourself, not the ones in the message."));

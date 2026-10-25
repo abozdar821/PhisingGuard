@@ -935,6 +935,7 @@ function createEngine(D, env) {
       case "/api/phishguard/config":
         return { ai_enabled: !!env.aiAvailable, ai_providers: env.aiAvailable ? [{ name: "Claude", model: "claude.ai" }] : [], examples: clone(D.PG_EXAMPLES),
                  ocr_engines: (env.ocrEngines || []).slice(),
+                 reporting: clone(D.PG_REPORTING), report_topics: clone(D.PG_REPORT_TOPICS),
                  bbb_cases: D.BBB_CASES.map(c => ({ id: c.id, business: c.business, url: c.url })) };
       case "/api/phishguard/scan": {
         const sender = String(body.sender || ""), subject = String(body.subject || ""), text = String(body.body || "");
