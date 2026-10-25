@@ -36,6 +36,9 @@ Open `http://127.0.0.1:5001` on the computer to check it works. Then choose how 
 
 - **Claude:** `ANTHROPIC_API_KEY=sk-ant-… python phishguard.py`
 - **Gemini:** `GEMINI_API_KEY=… python phishguard.py`
+- **Keep keys in a file instead:** create a file named `.env` in the same folder as `phishguard.py` with lines like
+  `GEMINI_API_KEY=your-key` or `ANTHROPIC_API_KEY=sk-ant-…`, then just run `python phishguard.py`. The file is ignored by
+  git, so it never reaches GitHub. Never put an API key in the phone (Vercel) version: that page is public.
 - **Offline (no key, nothing leaves your computer):** install Tesseract
   (Windows: the UB-Mannheim installer · macOS: `brew install tesseract` · Linux: `sudo apt install tesseract-ocr`),
   then `pip install pillow pytesseract`. For screenshots in other languages, add their Tesseract language packs
