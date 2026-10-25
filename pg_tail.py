@@ -531,6 +531,20 @@ def _looks_like_eml(data: bytes) -> bool:
         and bool(re.match(r"(?i)^[\w-]+:\s", head.lstrip()))
 
 
+def _zip_chat(data: bytes) -> tuple[str, str] | None:
+    """The chat text inside a WhatsApp export .zip (iPhone), or None."""
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            names = [i for i in z.infolist() if i.filename.lower().endswith(".txt") and i.file_size < 8_000_000]
+            pick = next((i for i in names if i.filename.lower().endswith("_chat.txt")), None) \
+                or next((i for i in names if "whatsapp" in i.filename.lower()), None) or (names[0] if len(names) == 1 else None)
+            return (z.read(pick).decode("utf-8", "replace"), pick.filename) if pick else None
+    except (zipfile.BadZipFile, OSError, RuntimeError):
+        return None
+
+
 def read_file(data: bytes, filename: str = "") -> dict:
     """Turn any supported upload into {mode, sender, subject, body, headers, ...} for the scanner."""
     name = (filename or "").lower()
@@ -558,7 +572,12 @@ def read_file(data: bytes, filename: str = "") -> dict:
                 "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": []}
     if name.endswith(".eml") or _looks_like_eml(data):
         return parse_eml(data)
-    unsupported = "That file type isn't supported. Use a screenshot, PDF, .eml email, text file or voicemail recording."
+    if data.startswith(b"PK\x03\x04"):
+        chat = _zip_chat(data)
+        if not chat:
+            raise ValueError("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.")
+        return parse_whatsapp(chat[0], filename or chat[1])
+    unsupported = "That file type isn't supported. Use a screenshot, PDF, .eml email, text file, WhatsApp chat export or voicemail recording."
     if name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".pdf")):
         raise ValueError("That file is damaged or isn't really a " + name.rsplit(".", 1)[1].upper() + ". " + unsupported.split(". ", 1)[1])
     try:
@@ -567,6 +586,8 @@ def read_file(data: bytes, filename: str = "") -> dict:
         raise ValueError(unsupported)
     if "\x00" in text or sum(ch < " " and ch not in "\r\n\t\f" for ch in text[:2000]) > 8:
         raise ValueError(unsupported)
+    if looks_like_whatsapp(text):
+        return parse_whatsapp(text, filename)
     parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
     if not parse_mail_print(text) and not parsed["sender"]:
         parsed = {**parsed, "body": re.sub(r"[ \t]+", " ", text).strip()[:5000]}
@@ -1103,7 +1124,7 @@ MANIFEST = {
     "share_target": {"action": "/share", "method": "POST", "enctype": "multipart/form-data",
                      "params": {"title": "title", "text": "text", "url": "url",
                                 "files": [{"name": "file", "accept": ["image/*", "application/pdf", "message/rfc822", ".eml",
-                                                                      "text/plain", "audio/*"]}]}},
+                                                                      "text/plain", ".txt", "application/zip", ".zip", "audio/*"]}]}},
 }
 SERVICE_WORKER = """const CACHE = "phishguard-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];

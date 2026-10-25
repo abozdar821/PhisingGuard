@@ -31,7 +31,7 @@ jobs:
         run: python sandbox.py --scenarios sandbox_scenarios.example.json --out "$RUNNER_TEMP/sandbox"
       - name: Phone version engine matches the Python engine, and every result is translated
         working-directory: web
-        run: node parity.js && node parity2.js && node i18n_coverage.js
+        run: node parity.js && node parity2.js && node i18n_coverage.js && node chat_check.js
       - name: Phone version reads Gmail-printed PDFs (pdf.js)
         working-directory: web
         run: npm install --no-save --no-package-lock pdfjs-dist@3.11.174 && node pdf_check.js

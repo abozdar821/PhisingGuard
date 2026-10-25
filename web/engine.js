@@ -422,6 +422,12 @@ function createEngine(D, env) {
       if (BAD_TLD.has(tld)) M.add(15, `High-abuse domain ending: .${tld}`);
       if (dom.length > 40) M.add(10, "Unusually long sender domain");
     } else if (mode === "email") M.add(10, "Sender is not a valid email address");
+    if (mode === "sms" && sn.kind === "name") {  // a DM or text from an account that names a brand and "support"
+      const hay = sn.display.toLowerCase();
+      const brand = Object.keys(D.PG_BRANDS).concat(Object.keys(D.PG_DISPLAY_BRANDS), D.PG_SOCIAL_BRANDS).find(b => new RegExp("(?<![a-z])" + reEsc(b) + "(?![a-z])").test(hay)) || "";
+      if (brand && /support|security|help|team|appeal|verif|service|official|admin|safety|copyright/.test(hay))
+        M.add(25, `Account name poses as ${brandName(brand)} support; real companies don't contact you this way`);
+    }
     return M;
   }
   const ROMANCE = /(?:near you|nearby|in your area|around you)\b[^.!?\n]{0,60}\b(?:wants? to|chat|meet|connect|reach you)|wants? to (?:chat|meet you|get to know you|reach you)|you seem (?:familiar|nice|interesting)|i (?:think i )?saw your (?:profile|photo|comment|picture)/;
@@ -459,7 +465,11 @@ function createEngine(D, env) {
     }
     if (/wrong number|is this [a-z]+\?|sorry,? (?:i )?(?:think )?(?:i have|i've got|got) the wrong/.test(t)
         && /\b(?:crypto|invest\w*|trad(?:e|ing)|returns|profit|platform|forex)\b/.test(t)) add(40, "Wrong-number opener that turns to investing (pig-butchering)", "pig");
-    if (/guaranteed (?:returns|profit)|\d+\s?% (?:a|per|every) (?:day|week)|\d+\s?% (?:daily|weekly)/.test(t)) add(25, "Promises guaranteed or unrealistic returns", "pig");
+    if (/\b(?:investment|trading|crypto|forex|bitcoin) (?:mentor|coach|expert|manager|advisor|adviser|teacher|tutor)\b/.test(t)
+        && /\b(?:guaranteed|returns?|profits?|earn\w*|join|group|invest\w*)\b/.test(t))
+      add(25, "An unsolicited \"investment mentor\" or trading coach, the usual start of an investment scam", "pig");
+    if (/guaranteed (?:returns|profit)|\d+\s?% (?:a|per|every) (?:day|week|month)|\d+\s?% (?:daily|weekly|monthly)|(?:\d+\s?% (?:profit|returns?|gains?)\b|\b(?:made|making|earn(?:ed|ing)?|gain(?:ed)?)\s+\d+\s?%)[^.\n]{0,25}\b(?:last|this|every|per|a) (?:month|week|day)/.test(t)) add(25, "Promises guaranteed or unrealistic returns", "pig");
+    if (/(?:start|begin|invest\w*) with (?:only |just )?\$?\d+|minimum (?:deposit|investment)/.test(t) && kinds.has("pig")) add(10, "Asks for a small first deposit to get you started", "pig");
     if (/gift ?cards?/.test(t) && /\b(?:buy|purchase|get|pick up)\b/.test(t) && /\bcodes?\b|scratch|\bpics?\b|photos?|send me|back of/.test(t))
       add(45, "Asks you to buy gift cards and send the codes", "gift");
     if (/keep (?:this|it) (?:confidential|between us|quiet)|i'?m in a meeting|can'?t talk|are you (?:free|available)\??/.test(t))
@@ -476,6 +486,30 @@ function createEngine(D, env) {
       if (/\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b|doctors? (?:hate|don'?t want you)|big pharma/.test(t))
         add(10, "Borrows a famous university or TV network's name to look credible", "health");
     }
+    if (/(?:earn|make|salary|income|commission|pay|paid|receive)\b[^.\n]{0,40}\$?\d[\d,]*(?:\s*(?:-|–|to)\s*\$?\d[\d,]*)?\s*(?:usd |dollars? |rs\.? |rupees )?(?:daily|a day|per day|\/day|every day)|\b(?:paid|earn|get|receive)\s+\$?\d[\d,.]*\s*(?:usd |dollars? )?(?:per|for (?:each|every)|a) (?:like|review|rating|task|video|order|click)\b|\b(?:liking|rating|reviewing|subscribing to|following)\s+(?:youtube |tiktok |instagram )?(?:videos?|products?|hotels?|apps?|channels?|posts?)\b|\b(?:simple|easy) (?:online |remote )?tasks?\b[^.\n]{0,60}\b(?:earn|paid|pay|commission)/.test(t)
+        || (/\b(?:app[- ]|product[- ]|hotel[- ]|video[- ])?(?:rating|reviewing|liking|clicking) tasks?\b/.test(t)
+            && /\$|\busd\b|\bearn|\bpaid\b|commission|\bdaily\b|per day|a day\b/.test(t))) {
+      add(50, "Task / part-time job scam: easy daily pay for liking, rating or reviewing things", "task");
+      if (/t\.me\/|\btelegram\b|\bsignal\b|contact (?:our|my|the) (?:receptionist|hr|manager|assistant|mentor|tutor|coordinator)/.test(t))
+        add(15, "Moves you to Telegram or a \"receptionist\" to continue, away from the app's protections", "task");
+    }
+    if (/\byou(?:'ve| have| are| were)? (?:been )?(?:selected|shortlisted|chosen|hired) for (?:a |an |the |our )?(?:remote |online |part[- ]time |home |work[- ]from[- ]home )*(?:job|position|role|work)\b/.test(t))
+      add(20, "Says you were picked for a job you never applied to", "task");
+    if (kinds.has("task") && /\breply (?:with )?(?:yes|y)\b/.test(t)) add(10, "Asks you to reply YES, which confirms your number is active", "task");
+    if (/\bnew (?:number|phone|whatsapp)\b|(?:lost|broke|dropped|damaged|smashed) my phone|(?:my (?:old )?phone|mine) (?:broke|is broken|fell|died|stopped working|(?:got|was) (?:stolen|damaged|lost|broken))|(?:using|on|from) (?:a|my) friend'?s phone/.test(t)
+        && /\b(?:send|transfer|pay|lend|borrow|need)\b[^.\n]{0,50}(?:money|\$|£|€|\brs\.?|rupees|pkr|inr|urgent\w*|asap|bill|jazz ?cash|easypaisa|zelle|venmo|cash ?app|paypal|bank|account)/.test(t))
+      add(55, "\"Hi Mum, I lost my phone, this is my new number\" story followed by a money request", "family");
+    if (/\b(?:\d[- ]?digit|verification|whatsapp|sms|login|otp|security|confirmation|activation) codes?\b|\bcodes?\b[^.\n]{0,30}\b(?:by mistake|accidentally|by accident)/.test(t)
+        && /by mistake|accidentally|by accident|wrong number|(?:send|forward|share)\s+(?:me\s+)?(?:it|the code|that code|this code)\b[^.\n]{0,30}\b(?:back|to me)\b/.test(t))
+      add(55, "Asks you to pass on a code \"sent by mistake\", a trick to take over your WhatsApp or other account", "code");
+    if (/\b(?:copyright|trademark|community (?:guidelines|standards)|violat\w*|infring\w*|flagged|reported)\b/.test(t)
+        && /\b(?:account|page|profile)\b[^.\n]{0,80}\b(?:will be|has been|is being|may be)\s+(?:permanently\s+)?(?:disabled|deleted|suspended|removed|banned|restricted|terminated)|\b(?:avoid|prevent) (?:a |the |any )?(?:permanent )?(?:removal|deletion|suspension|ban|being (?:disabled|deleted|removed))/.test(t)
+        && (links.length || /\bappeal\b/.test(t)))
+      add(40, "Fake \"copyright violation, appeal or your account will be disabled\" notice", "account");
+    if (/\b(?:eligible for|get|claim|apply for|qualif\w+ for)\b[^.\n]{0,30}\b(?:blue (?:badge|tick|check(?:mark)?)|verification badge|verified badge)/.test(t) && (links.length || /\bapply\b/.test(t)))
+      add(40, "Fake \"you're eligible for the blue badge\" offer, used to steal logins", "account");
+    if (links.length && /\bis (?:this|that) (?:really )?(?:you|u) in (?:this|the|that) (?:video|photo|pic)|look (?:what|who) i found|(?:you|u) (?:are|r) in (?:this|the) video|everyone is (?:talking about|sharing) (?:you|this)/.test(t))
+      add(30, "\"Is this you in this video?\" bait, used to steal social-media logins", "account");
     if (links.length && /did you (?:attempt|make|authori[sz]e)/.test(t) && /reply (?:yes|no|y|n)\b/.test(t)) add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert");
     return { M, kinds };
   }
@@ -483,16 +517,17 @@ function createEngine(D, env) {
   function vishingModule(text) {
     const M = mod(), kinds = new Set(), t = text.replace(NEG, " "), add = (p, x, k) => { M.add(p, x); kinds.add(k); };
     if (/\b(?:read|give|tell|provide|share|confirm|repeat)\b[^.!?\n]{0,40}\b(?:code|passcode|pin|verification number|one[- ]time)/.test(t)
-        || /\b(?:code|passcode|pin)\b[^!?\n]{0,80}\b(?:read|give|tell)\b (?:it|them|that|the (?:code|number))(?: back)?\b/.test(t))
+        || /\b(?:code|passcode|pin)\b[^!?\n]{0,80}\b(?:read|give|tell)\b (?:it|them|that|the (?:code|number))(?: back)?\b/.test(t)
+        || /\bsend (?:us|me|back)\b[^.!?\n]{0,30}\b(?:code|passcode|pin|verification number|one[- ]time)/.test(t))
       add(40, "Asks you to read back a code or PIN — banks and companies never ask for this", "code");
     if (/\b(?:fraud (?:department|team|prevention)|security (?:department|team)|tech(?:nical)? support|support team|account protection)\b/.test(t)
-        && /\b(?:suspicious|unauthori[sz]ed|fraud\w*|compromised|hacked|breach\w*|virus|charge)\b/.test(t))
+        && /\b(?:suspicious|unusual|unauthori[sz]ed|fraud\w*|compromised|hacked|breach\w*|virus|charge)\b/.test(t))
       add(20, "Caller claims to be a fraud department or support team", "impersonation");
     if (/\b(?:irs|social security|ssa|medicare|police|sheriff|marshal|federal agent|department of justice|immigration|customs)\b/.test(t)
         && /\b(?:arrest\w*|warrant|legal action|lawsuit|suspended|deport\w*|jail|prosecut\w*)\b/.test(t))
       add(40, "Threatens arrest, a warrant or legal action — government agencies don't do this by phone", "government");
-    if (/\b(?:gift ?cards?|bitcoin|crypto(?:currency)?(?: atm)?|bitcoin atm|wire transfer|western union|moneygram|zelle|cash ?app|venmo|prepaid (?:debit )?card)\b/.test(t)
-        && /\b(?:pay|send|buy|purchase|deposit|transfer|load|withdraw|wire)\b/.test(t))
+    if ((/\b(?:gift ?cards?|bitcoin|crypto(?:currency)?(?: atm)?|bitcoin atm|prepaid (?:debit )?card)\b/.test(t) && /\b(?:pay|send|buy|purchase|deposit|transfer|load|withdraw|wire)\b/.test(t))
+        || (/\b(?:wire transfer|western union|moneygram|zelle|cash ?app|venmo)\b/.test(t) && /\b(?:pay|send|deposit|transfer|withdraw|wire)\b/.test(t)))
       add(35, "Asks for payment by gift card, crypto, wire or a payment app", "payment");
     if (/\b(?:anydesk|teamviewer|ultraviewer|quick ?assist|logmein|remote (?:access|desktop|support)|screen ?share|install (?:an?|this|the) (?:app|program|software))\b/.test(t))
       add(40, "Wants remote access to your computer or phone", "remote");
@@ -665,10 +700,47 @@ function createEngine(D, env) {
     return { M, kinds };
   }
 
+  /* WhatsApp chats pasted, shared or exported: the other person's messages (same rules as the Python engine) */
+  const WA_STAMP = /^\[?(\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?),?\s+(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s?[ap]\.?\s?m\.?)?)\]?\s*(?:[-–]\s+)?/i;
+  const WA_SENDER = /^([^:\n]{1,60}?):\s/;
+  const WA_SKIP = /^(?:<media omitted>|<attached: [^>]*>|(?:image|video|audio|sticker|gif|document|contact card|photo) omitted|this message was deleted|you deleted this message|missed (?:voice|video) call.*|null|waiting for this message.*)$/i;
+  const WA_TITLE = /whatsapp chat (?:with|-)\s*(.+?)(?:\.(?:txt|zip))?$/i;
+  const waClean = l => l.replace(/[‎‏]/g, "").replace(/[  ]/g, " ").replace(/\s+$/, "");
+  function looksLikeWhatsApp(text) {
+    const lines = String(text || "").split(/\r?\n/).filter(l => l.trim()).slice(0, 40).map(waClean);
+    const hits = lines.filter(l => { const m = WA_STAMP.exec(l); return m && WA_SENDER.test(l.slice(m[0].length)); }).length;
+    return hits >= 2 || (hits === 1 && lines.length <= 3);
+  }
+  function parseWhatsApp(text, filename) {
+    let msgs = [];
+    for (const raw of String(text || "").split(/\r?\n/)) {
+      const l = waClean(raw), m = WA_STAMP.exec(l);
+      if (m) { const rest = l.slice(m[0].length), who = WA_SENDER.exec(rest); msgs.push(who ? [who[1].trim(), rest.slice(who[0].length)] : ["", ""]); }
+      else if (msgs.length && l.trim()) msgs[msgs.length - 1][1] += "\n" + l.trim();
+    }
+    msgs = msgs.filter(([w]) => w).map(([w, t]) => [w, t.replace(/\s*<this message was edited>\s*$/i, "").trim()]).filter(([, t]) => t && !WA_SKIP.test(t));
+    const people = [...new Set(msgs.map(([w]) => w))];
+    const title = ((WA_TITLE.exec(String(filename || "").split(/[\\/]/).pop()) || [])[1] || "").trim();
+    const phone = /^\+?[\d\s().-]{7,}$/;
+    const other = people.includes(title) ? title
+      : people.length === 2 && people.filter(p => phone.test(p)).length === 1 ? people.find(p => phone.test(p)) : (people[0] || "");
+    const group = people.length > 2;
+    const keep = group ? msgs.map(([w, t]) => `${w}: ${t}`) : msgs.filter(([w]) => w === other).map(([, t]) => t);
+    let body = keep.join("\n\n");
+    if (body.length > 5000) body = body.slice(0, 2400) + "\n…\n" + body.slice(-2400);
+    body = body.trim();
+    const note = group ? `WhatsApp group chat: ${msgs.length} messages from ${people.length} people checked`
+      : other ? `WhatsApp chat with ${other}: ${keep.length} of their messages checked (your replies are left out)` : "";
+    return {mode: "sms", sender: (group ? title : other).slice(0, 200), subject: "", body, headers: null,
+            engine: "WhatsApp chat export", app: "WhatsApp", readable: !!body,
+            notes: body ? note : "No messages found in that WhatsApp chat export.",
+            chat: {with: group ? title : other, count: keep.length, group, people: people.length}};
+  }
   function scan(mode, sender, subject, body, headers, lang, appWarning) {
     mode = ["email", "call", "link"].includes(mode) ? mode : "sms";
     if (mode !== "email") headers = null;
     const rawSender = sender, rawSubject = subject, rawBody = body;
+    if (mode === "sms" && looksLikeWhatsApp(body)) { const c = parseWhatsApp(body); if (c.body) { body = c.body; sender = sender || c.sender; } }
     const styledName = STYLED.test(sender.includes("@") ? normalizeSender(sender).display : sender), styledText = STYLED.test(subject + body);
     sender = foldStyled(sender); subject = foldStyled(subject); body = foldStyled(body);
     const sn = normalizeSender(sender);
@@ -726,6 +798,10 @@ function createEngine(D, env) {
     else if (lk.has("crypto") && linkSc >= 30) category = "Crypto wallet scam";
     else if (kinds.has("gift") && lure.sc >= 45) category = "Gift-card scam";
     else if (kinds.has("pig") && lure.sc >= 40) category = "Investment scam (pig-butchering)";
+    else if (kinds.has("family") && lure.sc >= 40) category = "Family-emergency scam";
+    else if (kinds.has("code") && lure.sc >= 40) category = "Account or code (OTP) scam";
+    else if (kinds.has("task") && lure.sc >= 35) category = "Job / recruitment scam";
+    else if (kinds.has("account") && lure.sc >= 30) category = "Social media account takeover";
     else if (kinds.has("billing") && lure.sc >= 30) category = "Billing / subscription scam";
     else if (kinds.has("health") && lure.sc >= 25) category = "Health / miracle-cure spam";
     else if (kinds.has("callback")) category = "Callback phishing";

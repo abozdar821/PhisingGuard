@@ -66,7 +66,7 @@ window.PGA = {
       (remote.length ? ` (screenshots are read by ${remote.join(" or ")}, so the image is sent to that service).` : ", entirely on your server.");
     const ok = {ok: true};
     return {image: e.length ? ok : {ok: false, why: "not set up on your server yet — add ANTHROPIC_API_KEY or GEMINI_API_KEY, or install Tesseract."},
-            pdf: ok, eml: ok, text: ok,
+            pdf: ok, eml: ok, text: ok, chat: ok,
             audio: tr.length ? ok : {ok: false, why: "add GEMINI_API_KEY or install faster-whisper on your server. Until then, paste the voicemail transcript."}};
   },
   async readFile(blob, name, kind, lang, qr) {
@@ -233,7 +233,7 @@ window.PGA = {
   async canRead() {
     const ok = {ok: true};
     // Screenshots: Claude reads them inside Claude; anywhere else the on-device reader (Tesseract.js) does
-    return {image: ok, pdf: ok, eml: ok, text: ok,
+    return {image: ok, pdf: ok, eml: ok, text: ok, chat: ok,
             audio: {ok: false, why: "need your own PhishGuard server (with Gemini or offline Whisper). Here, choose Phone call and paste the voicemail transcript."}};
   },
   async readFiles(items, lang, progress) {
@@ -282,10 +282,15 @@ window.PGA = {
       const read = await FileText.pdfRead(await blob.arrayBuffer());
       if (read.text.replace(/\\s/g, "").length < 20) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
       x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
+    } else if (kind === "chat") {
+      const c = await FileText.unzipChat(await blob.arrayBuffer());
+      if (!c) throw new Error("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.");
+      x = FileText.parseWhatsApp(c.text, name || c.name);
     } else {
       const raw = await blob.text();
       x = kind === "eml" || FileText.looksLikeEml(raw) ? {engine: "Email file", app: "Email file (.eml)", ...FileText.parseEml(raw)}
-                                                     : {engine: "Text file", app: "Text", ...FileText.parsePlain(raw)};
+        : FileText.looksLikeWhatsApp(raw) ? FileText.parseWhatsApp(raw, name)
+        : {engine: "Text file", app: "Text", ...FileText.parsePlain(raw)};
     }
     return finish(x);
     async function finish(x) {

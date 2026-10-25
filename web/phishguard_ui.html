@@ -254,10 +254,10 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
       <div class="upload">
         <label class="btn primary upload-btn" for="file"><span aria-hidden="true">📎</span> <span data-i18n="Upload file">Upload file</span></label>
         <label class="btn upload-btn" for="qr"><span aria-hidden="true">📷</span> <span data-i18n="Scan QR code">Scan QR code</span></label>
-        <span class="note" id="drop-hint" data-i18n="Screenshots, PDF, email file (.eml), text file or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.">Screenshots, PDF, email file (.eml), text file or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.</span>
+        <span class="note" id="drop-hint" data-i18n="Screenshots, PDF, email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.">Screenshots, PDF, email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.</span>
       </div>
       <input id="qr" type="file" accept="image/*" capture="environment" hidden>
-      <input id="file" type="file" multiple accept="image/*,.pdf,application/pdf,.eml,message/rfc822,.txt,text/plain,audio/*,.m4a,.mp3,.wav,.amr,.aac,.ogg" hidden>
+      <input id="file" type="file" multiple accept="image/*,.pdf,application/pdf,.eml,message/rfc822,.txt,text/plain,.zip,application/zip,audio/*,.m4a,.mp3,.wav,.amr,.aac,.ogg" hidden>
       <p class="note" id="ocr-note" style="margin-top:10px" hidden></p>
       <div class="or" data-i18n="or paste the message">or paste the message</div>
       <form id="text-form" autocomplete="off">
@@ -537,7 +537,7 @@ async function onQR(file) {
     await runCheck("link", "", "", text.slice(0, 5000), null);
   } finally { $("qr").value = ""; }
 }
-const KIND_ICON = {pdf: "📄", eml: "✉️", text: "📝", audio: "🎙️"};
+const KIND_ICON = {pdf: "📄", eml: "✉️", text: "📝", audio: "🎙️", chat: "💬"};
 function fileKind(f) {
   const n = (f.name || "").toLowerCase(), t = f.type || "";
   if (/^image\//.test(t) || /\.(png|jpe?g|gif|webp|heic)$/.test(n)) return "image";
@@ -545,18 +545,19 @@ function fileKind(f) {
   if (t === "message/rfc822" || n.endsWith(".eml")) return "eml";
   if (/^audio\//.test(t) || /\.(m4a|mp3|wav|amr|aac|ogg|opus|flac|caf|3gp)$/.test(n)) return "audio";
   if (/^text\//.test(t) || /\.(txt|text|md)$/.test(n)) return "text";
+  if (/zip/.test(t) || n.endsWith(".zip")) return "chat";  // a WhatsApp "Export chat" file from an iPhone
   return "unknown";
 }
 async function onFile(file) {
   if (!file) return;
   const kind = fileKind(file);
-  if (kind === "unknown") { toast(t("Use a screenshot, PDF, .eml email, text file or voicemail recording"), true); return; }
+  if (kind === "unknown") { toast(t("Use a screenshot, PDF, .eml email, text file, WhatsApp chat export or voicemail recording"), true); return; }
   const sup = (PG.canRead && PG.canRead[kind]) || {ok: false};
   const qrText = kind === "image" ? ((await decodeQR(file)) || "").trim().slice(0, 2000) : "";
   if (!sup.ok && qrText) return onQR(file);  // can't read the text here, but the QR code can still be checked
   if (!sup.ok) { toast(tr(sup.why) || t("That file type can't be read here"), true); return; }
   $("result-card").hidden = true; $("reading-card").hidden = false; $("extracted-wrap").hidden = true;
-  const verb = {image: "Reading the screenshot", pdf: "Reading the PDF", eml: "Reading the email", text: "Reading the file", audio: "Transcribing the recording"}[kind];
+  const verb = {image: "Reading the screenshot", pdf: "Reading the PDF", eml: "Reading the email", text: "Reading the file", audio: "Transcribing the recording", chat: "Reading the chat"}[kind];
   $("reading-status").innerHTML = `<span class="spin"></span>${esc(t(verb))}…`; $("readby").textContent = file.name || "";
   $("thumb").hidden = kind !== "image"; $("fileicon").hidden = kind === "image"; $("fileicon").textContent = KIND_ICON[kind] || "📄";
   $("reading-card").scrollIntoView({behavior: "smooth", block: "start"});
@@ -634,6 +635,9 @@ function showExtracted(x) {
   $("readby").textContent = (x.files > 1 ? t("{n} files combined", {n: x.files}) + " · " : "") + t("Read by {engine}", {engine: String(x.engine || "").split(" + ").map(e => tr(e)).join(" + ")}) + (x.app ? " · " + x.app : "");
   $("x-sender").value = x.sender || ""; $("x-subject").value = x.subject || ""; $("x-body").value = x.body || "";
   $("x-subject-row").hidden = x.mode !== "email";
+  if (x.chat && x.readable) $("reading-status").innerHTML += ` <span class="note">${esc(x.chat.group
+    ? t("WhatsApp group chat: {n} messages from {people} people checked", {n: x.chat.count, people: x.chat.people})
+    : t("WhatsApp chat with {name}: {n} of their messages checked (your replies are left out)", {name: x.chat.with, n: x.chat.count}))}</span>`;
   setMode(x.mode || "sms");
   $("extracted-wrap").hidden = !x.readable && !x.body;
 }

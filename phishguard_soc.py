@@ -840,12 +840,13 @@ PG_BUCKET_HOSTS = ["storage.googleapis.com", "firebasestorage.googleapis.com", "
 PG_FREE_SUBDOMAINS = ["my.id", "web.id", "biz.id", "us.kg", "eu.org", "pp.ua", "ddns.net", "duckdns.org"]
 PG_FREE_HOSTS += [h for h in PG_BUCKET_HOSTS + PG_FREE_SUBDOMAINS if h not in PG_FREE_HOSTS]
 # Brands matched only when the sender's whole display name is the brand ("Messenger"), since the word is common.
+PG_SOCIAL_BRANDS = ["meta", "tiktok", "snapchat", "telegram", "youtube", "twitter", "discord"]  # for "<brand> Support" DM accounts
 PG_DISPLAY_BRANDS = {"messenger": ["facebook.com", "facebookmail.com", "messenger.com", "fb.com", "meta.com"]}
 # Words that, stitched together in a website name, are typical of fake banking / delivery / support sites.
 PG_SCAM_WORDS = ["secure", "login", "signin", "verify", "verification", "account", "update", "support", "service",
                  "billing", "refund", "parcel", "delivery", "redeliver", "track", "tracking", "toll", "unpaid", "customs",
                  "wallet", "airdrop", "claim", "reward", "bonus", "unlock", "suspend", "alert", "helpdesk", "recovery",
-                 "restore", "review", "payment", "invoice"]
+                 "restore", "review", "payment", "invoice", "appeal", "center", "centre", "copyright", "violation"]
 PG_CRYPTO_WORDS = ["airdrop", "walletconnect", "wallet-connect", "connect-wallet", "claim-token", "claimtoken",
                    "seed-phrase", "seedphrase", "metamask", "trustwallet", "trust-wallet", "phantom-wallet",
                    "usdt-claim", "nft-mint", "defi-claim", "restore-wallet", "wallet-restore", "validate-wallet"]
@@ -1203,6 +1204,11 @@ def _sender_module(sn: dict, mode: str, styled_name: bool = False):
         if len(dom) > 40: add(10, "Unusually long sender domain")
     elif mode == "email" and sn["kind"] != "email":
         add(10, "Sender is not a valid email address")
+    if mode == "sms" and sn["kind"] == "name":  # a DM or text from an account that names a brand and "support"
+        hay = sn["display"].lower()
+        brand = next((b for b in list(PG_BRANDS) + list(PG_DISPLAY_BRANDS) + PG_SOCIAL_BRANDS if re.search(r"(?<![a-z])" + re.escape(b) + r"(?![a-z])", hay)), "")
+        if brand and re.search(r"support|security|help|team|appeal|verif|service|official|admin|safety|copyright", hay):
+            add(25, f"Account name poses as {_brand(brand)} support; real companies don't contact you this way")
     return sc, fl
 
 
@@ -1266,8 +1272,14 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
     if re.search(r"wrong number|is this [a-z]+\?|sorry,? (?:i )?(?:think )?(?:i have|i've got|got) the wrong", text_l) \
             and re.search(r"\b(?:crypto|invest\w*|trad(?:e|ing)|returns|profit|platform|forex)\b", text_l):
         add(40, "Wrong-number opener that turns to investing (pig-butchering)", "pig")
-    if re.search(r"guaranteed (?:returns|profit)|\d+\s?% (?:a|per|every) (?:day|week)|\d+\s?% (?:daily|weekly)", text_l):
+    if re.search(r"\b(?:investment|trading|crypto|forex|bitcoin) (?:mentor|coach|expert|manager|advisor|adviser|teacher|tutor)\b", text_l) \
+            and re.search(r"\b(?:guaranteed|returns?|profits?|earn\w*|join|group|invest\w*)\b", text_l):
+        add(25, "An unsolicited \"investment mentor\" or trading coach, the usual start of an investment scam", "pig")
+    if re.search(r"guaranteed (?:returns|profit)|\d+\s?% (?:a|per|every) (?:day|week|month)|\d+\s?% (?:daily|weekly|monthly)"
+                 r"|(?:\d+\s?% (?:profit|returns?|gains?)\b|\b(?:made|making|earn(?:ed|ing)?|gain(?:ed)?)\s+\d+\s?%)[^.\n]{0,25}\b(?:last|this|every|per|a) (?:month|week|day)", text_l):
         add(25, "Promises guaranteed or unrealistic returns", "pig")
+    if re.search(r"(?:start|begin|invest\w*) with (?:only |just )?\$?\d+|minimum (?:deposit|investment)", text_l) and "pig" in kinds:
+        add(10, "Asks for a small first deposit to get you started", "pig")
     if re.search(r"gift ?cards?", text_l) and re.search(r"\b(?:buy|purchase|get|pick up)\b", text_l) \
             and re.search(r"\bcodes?\b|scratch|\bpics?\b|photos?|send me|back of", text_l):
         add(45, "Asks you to buy gift cards and send the codes", "gift")
@@ -1294,6 +1306,35 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
         if re.search(r"\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b"
                      r"|doctors? (?:hate|don'?t want you)|big pharma", text_l):
             add(10, "Borrows a famous university or TV network's name to look credible", "health")
+    if re.search(r"(?:earn|make|salary|income|commission|pay|paid|receive)\b[^.\n]{0,40}\$?\d[\d,]*(?:\s*(?:-|–|to)\s*\$?\d[\d,]*)?\s*(?:usd |dollars? |rs\.? |rupees )?(?:daily|a day|per day|/day|every day)"
+                 r"|\b(?:paid|earn|get|receive)\s+\$?\d[\d,.]*\s*(?:usd |dollars? )?(?:per|for (?:each|every)|a) (?:like|review|rating|task|video|order|click)\b"
+                 r"|\b(?:liking|rating|reviewing|subscribing to|following)\s+(?:youtube |tiktok |instagram )?(?:videos?|products?|hotels?|apps?|channels?|posts?)\b"
+                 r"|\b(?:simple|easy) (?:online |remote )?tasks?\b[^.\n]{0,60}\b(?:earn|paid|pay|commission)", text_l) \
+            or (re.search(r"\b(?:app[- ]|product[- ]|hotel[- ]|video[- ])?(?:rating|reviewing|liking|clicking) tasks?\b", text_l)
+                and re.search(r"\$|\busd\b|\bearn|\bpaid\b|commission|\bdaily\b|per day|a day\b", text_l)):
+        add(50, "Task / part-time job scam: easy daily pay for liking, rating or reviewing things", "task")
+        if re.search(r"t\.me/|\btelegram\b|\bsignal\b|contact (?:our|my|the) (?:receptionist|hr|manager|assistant|mentor|tutor|coordinator)", text_l):
+            add(15, "Moves you to Telegram or a \"receptionist\" to continue, away from the app's protections", "task")
+    if re.search(r"\byou(?:'ve| have| are| were)? (?:been )?(?:selected|shortlisted|chosen|hired) for (?:a |an |the |our )?(?:remote |online |part[- ]time |home |work[- ]from[- ]home )*(?:job|position|role|work)\b", text_l):
+        add(20, "Says you were picked for a job you never applied to", "task")
+    if "task" in kinds and re.search(r"\breply (?:with )?(?:yes|y)\b", text_l):
+        add(10, "Asks you to reply YES, which confirms your number is active", "task")
+    if re.search(r"\bnew (?:number|phone|whatsapp)\b|(?:lost|broke|dropped|damaged|smashed) my phone|(?:my (?:old )?phone|mine) (?:broke|is broken|fell|died|stopped working|(?:got|was) (?:stolen|damaged|lost|broken))"
+                 r"|(?:using|on|from) (?:a|my) friend'?s phone", text_l) \
+            and re.search(r"\b(?:send|transfer|pay|lend|borrow|need)\b[^.\n]{0,50}(?:money|\$|£|€|\brs\.?|rupees|pkr|inr|urgent\w*|asap|bill|jazz ?cash|easypaisa|zelle|venmo|cash ?app|paypal|bank|account)", text_l):
+        add(55, "\"Hi Mum, I lost my phone, this is my new number\" story followed by a money request", "family")
+    if re.search(r"\b(?:\d[- ]?digit|verification|whatsapp|sms|login|otp|security|confirmation|activation) codes?\b|\bcodes?\b[^.\n]{0,30}\b(?:by mistake|accidentally|by accident)", text_l) \
+            and re.search(r"by mistake|accidentally|by accident|wrong number|(?:send|forward|share)\s+(?:me\s+)?(?:it|the code|that code|this code)\b[^.\n]{0,30}\b(?:back|to me)\b", text_l):
+        add(55, "Asks you to pass on a code \"sent by mistake\", a trick to take over your WhatsApp or other account", "code")
+    if re.search(r"\b(?:copyright|trademark|community (?:guidelines|standards)|violat\w*|infring\w*|flagged|reported)\b", text_l) \
+            and re.search(r"\b(?:account|page|profile)\b[^.\n]{0,80}\b(?:will be|has been|is being|may be)\s+(?:permanently\s+)?(?:disabled|deleted|suspended|removed|banned|restricted|terminated)"
+                          r"|\b(?:avoid|prevent) (?:a |the |any )?(?:permanent )?(?:removal|deletion|suspension|ban|being (?:disabled|deleted|removed))", text_l) \
+            and (links or re.search(r"\bappeal\b", text_l)):
+        add(40, "Fake \"copyright violation, appeal or your account will be disabled\" notice", "account")
+    if re.search(r"\b(?:eligible for|get|claim|apply for|qualif\w+ for)\b[^.\n]{0,30}\b(?:blue (?:badge|tick|check(?:mark)?)|verification badge|verified badge)", text_l) and (links or re.search(r"\bapply\b", text_l)):
+        add(40, "Fake \"you're eligible for the blue badge\" offer, used to steal logins", "account")
+    if links and re.search(r"\bis (?:this|that) (?:really )?(?:you|u) in (?:this|the|that) (?:video|photo|pic)|look (?:what|who) i found|(?:you|u) (?:are|r) in (?:this|the) video|everyone is (?:talking about|sharing) (?:you|this)", text_l):
+        add(30, "\"Is this you in this video?\" bait, used to steal social-media logins", "account")
     if links and re.search(r"did you (?:attempt|make|authori[sz]e)", text_l) and re.search(r"reply (?:yes|no|y|n)\b", text_l):
         add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert")
     return sc, fl, kinds
@@ -1544,16 +1585,19 @@ def _vishing_module(text_l: str):
         fl.append((p, txt))
         kinds.add(kind)
     if re.search(r"\b(?:read|give|tell|provide|share|confirm|repeat)\b[^.!?\n]{0,40}\b(?:code|passcode|pin|verification number|one[- ]time)", t) \
-            or re.search(r"\b(?:code|passcode|pin)\b[^!?\n]{0,80}\b(?:read|give|tell)\b (?:it|them|that|the (?:code|number))(?: back)?\b", t):
+            or re.search(r"\b(?:code|passcode|pin)\b[^!?\n]{0,80}\b(?:read|give|tell)\b (?:it|them|that|the (?:code|number))(?: back)?\b", t) \
+        or re.search(r"\bsend (?:us|me|back)\b[^.!?\n]{0,30}\b(?:code|passcode|pin|verification number|one[- ]time)", t):
         add(40, "Asks you to read back a code or PIN — banks and companies never ask for this", "code")
     if re.search(r"\b(?:fraud (?:department|team|prevention)|security (?:department|team)|tech(?:nical)? support|support team|account protection)\b", t) \
-            and re.search(r"\b(?:suspicious|unauthori[sz]ed|fraud\w*|compromised|hacked|breach\w*|virus|charge)\b", t):
+            and re.search(r"\b(?:suspicious|unusual|unauthori[sz]ed|fraud\w*|compromised|hacked|breach\w*|virus|charge)\b", t):
         add(20, "Caller claims to be a fraud department or support team", "impersonation")
     if re.search(r"\b(?:irs|social security|ssa|medicare|police|sheriff|marshal|federal agent|department of justice|immigration|customs)\b", t) \
             and re.search(r"\b(?:arrest\w*|warrant|legal action|lawsuit|suspended|deport\w*|jail|prosecut\w*)\b", t):
         add(40, "Threatens arrest, a warrant or legal action — government agencies don't do this by phone", "government")
-    if re.search(r"\b(?:gift ?cards?|bitcoin|crypto(?:currency)?(?: atm)?|bitcoin atm|wire transfer|western union|moneygram|zelle|cash ?app|venmo|prepaid (?:debit )?card)\b", t) \
-            and re.search(r"\b(?:pay|send|buy|purchase|deposit|transfer|load|withdraw|wire)\b", t):
+    if (re.search(r"\b(?:gift ?cards?|bitcoin|crypto(?:currency)?(?: atm)?|bitcoin atm|prepaid (?:debit )?card)\b", t)
+            and re.search(r"\b(?:pay|send|buy|purchase|deposit|transfer|load|withdraw|wire)\b", t)) \
+            or (re.search(r"\b(?:wire transfer|western union|moneygram|zelle|cash ?app|venmo)\b", t)
+                and re.search(r"\b(?:pay|send|deposit|transfer|withdraw|wire)\b", t)):
         add(35, "Asks for payment by gift card, crypto, wire or a payment app", "payment")
     if re.search(r"\b(?:anydesk|teamviewer|ultraviewer|quick ?assist|logmein|remote (?:access|desktop|support)|screen ?share|install (?:an?|this|the) (?:app|program|software))\b", t):
         add(40, "Wants remote access to your computer or phone", "remote")
@@ -1761,6 +1805,11 @@ PG_ACTIONS["Health / miracle-cure spam"] = [
     "Real medical breakthroughs aren't announced in surprise emails. Ask your doctor instead.",
     "Never enter card details there. These sites often sign you up for hidden repeat charges.",
     "Mark it as spam and delete it."]
+PG_ACTIONS["Social media account takeover"] = [
+    "Don't open the link or log in from it. Meta, Instagram and WhatsApp don't send appeal links or \"is this you?\" videos in DMs.",
+    "Check for real warnings inside the app itself (Settings → Account Status / Support Inbox).",
+    "If you already typed your password, change it now and turn on two-factor authentication.",
+    "Report the account and block it."]
 PG_ACTIONS["Known dangerous link"] = [
     "Don't open it: Google Safe Browsing lists this exact address as dangerous.",
     "If you already opened it and typed a password or card number, change that password and call your bank now.",
@@ -1949,12 +1998,71 @@ def ai_assess(scan: dict) -> list[dict]:
 PG_LINK_INTEL = None
 
 
+# ── WhatsApp "Export chat" files: .txt (Android) or a .zip holding _chat.txt (iPhone) ──
+_WA_STAMP = re.compile(r"^\[?(\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?),?\s+(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:\s?[ap]\.?\s?m\.?)?)\]?\s*(?:[-–]\s+)?", re.I)
+_WA_SENDER = re.compile(r"^([^:\n]{1,60}?):\s")
+_WA_SKIP = re.compile(r"(?i)^(?:<media omitted>|<attached: [^>]*>|(?:image|video|audio|sticker|gif|document|contact card|photo) omitted|"
+                      r"this message was deleted|you deleted this message|missed (?:voice|video) call.*|null|waiting for this message.*)$")
+_WA_TITLE = re.compile(r"(?i)whatsapp chat (?:with|-)\s*(.+?)(?:\.(?:txt|zip))?$")
+
+
+def _wa_clean(line: str) -> str:
+    return line.replace("\u200e", "").replace("\u200f", "").replace("\u202f", " ").replace("\u00a0", " ").rstrip()
+
+
+def looks_like_whatsapp(text: str) -> bool:
+    lines = [_wa_clean(ln) for ln in (text or "").splitlines() if ln.strip()][:40]
+    hits = sum(1 for ln in lines if _WA_STAMP.match(ln) and _WA_SENDER.match(_WA_STAMP.sub("", ln, 1)))
+    return hits >= 2 or (hits == 1 and len(lines) <= 3)
+
+
+def parse_whatsapp(text: str, filename: str = "") -> dict:
+    """The other person's messages (oldest first) from a WhatsApp chat export, without your replies, times or media notes."""
+    msgs: list[list[str]] = []
+    for raw in (text or "").splitlines():
+        ln = _wa_clean(raw)
+        m = _WA_STAMP.match(ln)
+        if m:
+            rest = ln[m.end():]
+            who = _WA_SENDER.match(rest)
+            msgs.append([who.group(1).strip(), rest[who.end():]] if who else ["", ""])  # no name: a system notice
+        elif msgs and ln.strip():
+            msgs[-1][1] += "\n" + ln.strip()
+    msgs = [[w, re.sub(r"\s*<this message was edited>\s*$", "", t, flags=re.I).strip()] for w, t in msgs if w]
+    msgs = [[w, t] for w, t in msgs if t and not _WA_SKIP.match(t)]
+    people = list(dict.fromkeys(w for w, _ in msgs))
+    title = (_WA_TITLE.search(os.path.basename(filename or "")) or [None, ""])[1].strip()
+    phone = re.compile(r"^\+?[\d\s().-]{7,}$")
+    if title in people:
+        other = title
+    elif len([p for p in people if phone.match(p)]) == 1 and len(people) == 2:
+        other = next(p for p in people if phone.match(p))  # an unsaved number is the stranger, not you
+    else:
+        other = people[0] if people else ""  # whoever wrote first, usually the one who reached out
+    group = len(people) > 2
+    keep = [f"{w}: {t}" for w, t in msgs] if group else [t for w, t in msgs if w == other]
+    body = "\n\n".join(keep)
+    if len(body) > 5000:
+        body = body[:2400] + "\n…\n" + body[-2400:]
+    sender = (title or "") if group else other
+    note = (f"WhatsApp group chat: {len(msgs)} messages from {len(people)} people checked" if group
+            else f"WhatsApp chat with {other}: {len(keep)} of their messages checked (your replies are left out)" if other else "")
+    return {"mode": "sms", "sender": sender[:200], "subject": "", "body": body.strip(), "headers": None,
+            "engine": "WhatsApp chat export", "app": "WhatsApp", "readable": bool(body.strip()),
+            "notes": note if body.strip() else "No messages found in that WhatsApp chat export.", "fallback_errors": [],
+            "chat": {"with": sender, "count": len(keep), "group": group, "people": len(people)}}
+
+
 def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: dict | None = None,
                     lang: str = "en", app_warning: str = "") -> dict:
     mode = mode if mode in ("email", "call", "link") else "sms"
     if mode != "email":
         headers = None
     raw_sender, raw_subject, raw_body = sender, subject, body
+    if mode == "sms" and looks_like_whatsapp(body):  # several WhatsApp messages pasted or shared: check the other person's
+        chat = parse_whatsapp(body)
+        if chat["body"]:
+            body, sender = chat["body"], sender or chat["sender"]
     styled_name = bool(_STYLED_RE.search(parseaddr(sender)[0] if "@" in sender else sender))
     styled_text = bool(_STYLED_RE.search(subject + body))
     sender, subject, body = fold_styled(sender), fold_styled(subject), fold_styled(body)
@@ -2061,6 +2169,14 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Gift-card scam"
     elif "pig" in kinds and lure_sc >= 40:
         category = "Investment scam (pig-butchering)"
+    elif "family" in kinds and lure_sc >= 40:
+        category = "Family-emergency scam"
+    elif "code" in kinds and lure_sc >= 40:
+        category = "Account or code (OTP) scam"
+    elif "task" in kinds and lure_sc >= 35:
+        category = "Job / recruitment scam"
+    elif "account" in kinds and lure_sc >= 30:
+        category = "Social media account takeover"
     elif "billing" in kinds and lure_sc >= 30:
         category = "Billing / subscription scam"
     elif "health" in kinds and lure_sc >= 25:

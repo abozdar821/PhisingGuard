@@ -36,6 +36,10 @@ Open `http://127.0.0.1:5001` on the computer to check it works. Then choose how 
 
 - **Claude:** `ANTHROPIC_API_KEY=sk-ant-… python phishguard.py`
 - **Gemini:** `GEMINI_API_KEY=… python phishguard.py`
+- **WhatsApp, Messenger and Instagram DMs:** PhishGuard can't read your chats on its own (no app can), but you can bring them in:
+  a **screenshot** of the chat, **copy and paste** (several WhatsApp messages copied together are understood, and only the
+  other person's messages are checked), **Share → PhishGuard** on Android, or WhatsApp's **Export chat** (⋮ / contact name →
+  More → Export chat → *Without media*). Upload the `.txt` file (Android) or the `.zip` (iPhone) as it is.
 - **Gemini as a backup assistant (with Google's scam data):** with `GEMINI_API_KEY` set, Gemini gives a second opinion on
   every check and uses Google Search to look up the sender's domain, link websites and phone numbers for public scam reports
   (its sources are listed under its opinion; turn this off with `GEMINI_SEARCH=0`). The same key is also tried for
