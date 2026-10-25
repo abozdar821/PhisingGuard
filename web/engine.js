@@ -339,6 +339,7 @@ function createEngine(D, env) {
     return [null, ""];
   }
   const PLATFORMS = new Set(D.RECRUITING_PLATFORMS), FREEMAIL = new Set(D.FREEMAIL);
+  const OFFER_RE = /\b(?:offer|opportunit\w*|position|role|job|hiring|recruit\w*|interview\w*|candidate|resume|staffing|vacanc\w*)\b/;
   const HIRING_RE = /\b(?:interview\w*|position|role|applying|application|hiring|job offer|offer letter|onboarding|resume|candidate)\b/;
   function employerModule(sn, t, links) {
     const M = mod();
@@ -352,6 +353,10 @@ function createEngine(D, env) {
       }
       if (has(t, c.names).length && sd && HIRING_RE.test(t) && !c.official_domains.includes(sd) && !PLATFORMS.has(sd)) {
         M.add(45, `Says it's hiring for ${c.employer} but comes from ${FREEMAIL.has(sd) ? "a personal " + sd + " address" : sd}, not ${c.official_domains.join(", ")}`);
+        return { M, c };
+      }
+      if (has(t, c.names).length && sn.kind !== "email" && c.texts_first === false && OFFER_RE.test(t)) {
+        M.add(45, `Says it's from ${c.employer} but reaches out by text or a chat app, which its recruiters don't do first`);
         return { M, c };
       }
     }
@@ -372,6 +377,9 @@ function createEngine(D, env) {
     if (/we(?: will|'ll|’ll) assume/.test(b)) M.add(20, "Pressure tactic: \"we will assume you're not interested\"");
     if (b.includes("remove you from our applicant list")) M.add(15, "Threatens to remove you from an applicant list");
     if (sn.kind === "phone" && sn.value.startsWith("208") && (ph.length || cos.length)) M.add(15, "Idaho (208) number linked to the Bergen / Sandpiper job-scam ring");
+    if (sn.kind !== "email" && /\b(?:i'?m|i am|this is|my name is)\b[^.\n]{2,40}\b(?:from|with|at)\b[^.\n]{2,50}\b(?:staffing|recruit\w*|talent|human resources|hr|careers|employment|workforce|agency)\b/.test(b)
+        && /\b(?:offer|opportunit\w*|position|role|job|vacanc\w*)\b[^.\n]{0,60}\b(?:great fit|perfect fit|good fit|suit\w*|match\w*)\b|\bare you (?:interested|available|open)\b|\binterested in (?:the |more )?details\b|\bwould you like (?:to know|more|details)/.test(b))
+      M.add(30, "A recruiter you never contacted reaches out by text or chat app (staffing firms are widely impersonated)");
     const tpl = has(b, D.RECRUIT_TEMPLATE);
     if (tpl.length >= 3) M.add(15, `Mass-recruiting template wording used in fake job offers (${tpl.length} phrases)`);
     return M;

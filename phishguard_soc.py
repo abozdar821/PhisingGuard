@@ -756,6 +756,14 @@ EMPLOYER_CASES = [{
     "status": "Reported by a PhishGuard user; not yet confirmed by Trailhead Biosystems",
     "verify": "call 216-445-3835 or email info@trailbio.com",
     "note": "Copies Trailhead's real Internal IT job posting (Beachwood, OH) and offers it as a remote IT Specialist role.",
+}, {
+    "id": "beacon-hill-2026-10", "employer": "Beacon Hill Staffing", "names": ["beacon hill staffing", "beacon hill staffing group"],
+    "official_domains": ["beaconhillstaffing.com", "bhsg.com"], "lookalike_domains": [],
+    "reported": "October 25, 2026",
+    "status": "Beacon Hill has published its own warning about people impersonating its recruiters",
+    "verify": "use the contact details on beaconhillstaffing.com",
+    "note": "Beacon Hill says its recruiters never ask for personal information over WhatsApp, Telegram or text, and only text after a phone or video call.",
+    "texts_first": False,  # its real recruiters don't make first contact by text or chat app
 }]
 # Hiring systems that legitimately send mail for many employers.
 RECRUITING_PLATFORMS = {
@@ -771,6 +779,7 @@ RECRUIT_TEMPLATE = ["after carefully reviewing your resume", "impressed with you
                     "align well with the requirements", "participate in an online interview",
                     "online interview with our hiring manager", "let us know your best availability",
                     "organizational expertise", "how your skills and experience may contribute"]
+_OFFER_RE = re.compile(r"\b(?:offer|opportunit\w*|position|role|job|hiring|recruit\w*|interview\w*|candidate|resume|staffing|vacanc\w*)\b")
 _HIRING_RE = re.compile(r"\b(?:interview\w*|position|role|applying|application|hiring|job offer|offer letter|onboarding|resume|candidate)\b")
 
 PG_URGENCY = ["urgent", "immediately", "verify", "suspend", "suspended", "locked", "expire", "expires",
@@ -1120,6 +1129,9 @@ def _employer_module(sn: dict, text_l: str, links: list[dict]):
             fl.append((45, f"Says it's hiring for {case['employer']} but comes from {kind}, not "
                            f"{', '.join(case['official_domains'])}"))
             return 45, fl, case
+        if named and sn["kind"] != "email" and case.get("texts_first") is False and _OFFER_RE.search(text_l):
+            fl.append((45, f"Says it's from {case['employer']} but reaches out by text or a chat app, which its recruiters don't do first"))
+            return 45, fl, case
     return sc, fl, None
 
 
@@ -1144,6 +1156,11 @@ def _job_module(body_l: str, sn: dict):
     if re.search(r"we(?: will|'ll|’ll) assume", body_l): add(20, "Pressure tactic: \"we will assume you're not interested\"")
     if "remove you from our applicant list" in body_l: add(15, "Threatens to remove you from an applicant list")
     if sn["kind"] == "phone" and sn["value"].startswith("208") and (ph or cos): add(15, "Idaho (208) number linked to the Bergen / Sandpiper job-scam ring")
+    if sn["kind"] != "email" and re.search(r"\b(?:i'?m|i am|this is|my name is)\b[^.\n]{2,40}\b(?:from|with|at)\b[^.\n]{2,50}"
+                                           r"\b(?:staffing|recruit\w*|talent|human resources|hr|careers|employment|workforce|agency)\b", body_l) \
+            and re.search(r"\b(?:offer|opportunit\w*|position|role|job|vacanc\w*)\b[^.\n]{0,60}\b(?:great fit|perfect fit|good fit|suit\w*|match\w*)\b"
+                          r"|\bare you (?:interested|available|open)\b|\binterested in (?:the |more )?details\b|\bwould you like (?:to know|more|details)", body_l):
+        add(30, "A recruiter you never contacted reaches out by text or chat app (staffing firms are widely impersonated)")
     tpl = _has(body_l, RECRUIT_TEMPLATE)
     if len(tpl) >= 3: add(15, f"Mass-recruiting template wording used in fake job offers ({len(tpl)} phrases)")
     return sc, fl
