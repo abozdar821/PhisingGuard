@@ -116,10 +116,117 @@ let SAMPLE = null, LIMITS = null, pending = true;
 const why = code => ({not_granted: "Claude wasn't allowed for this page, so screenshots can't be read here. Paste the text instead.",
   rate_limited: "Claude is busy right now. Try again in a minute.", images_unavailable: "This view can't send images to Claude. Paste the text instead.",
   invalid_json: "Claude couldn't turn that image into a message. Try a clearer screenshot."}[code]);
+/* ── Gemini backup assistant: the user's own Google key, kept only in this browser ── */
+const KG = "phishguard.gemini", KSB = "phishguard.gemini.sb", GEMINI_MODEL = "gemini-flash-latest";
+const gemKey = () => ls.get(KG) || "";
+const lsDel = k => { try { localStorage.removeItem(k); } catch (e) {} };
+const FREEMAIL = new Set(PG_DATA.FREEMAIL || []);
+const GEMINI_SEARCH_NOTE = "\\nYou can use Google Search. Look up the items under <lookups> (sender domain or number, link websites, phone numbers) " +
+  "for public scam or phishing reports, e.g. FTC, BBB Scam Tracker, news, forums and scam-report sites, and say briefly in the reasoning what you " +
+  "found (or that you found nothing). Never search for the recipient's own name, email address or other personal details from the message.";
+async function gemCall(parts, opts) {
+  const key = gemKey();
+  if (!key) throw new Error("Add your Gemini API key first (History → Gemini backup assistant).");
+  const body = {contents: [{role: "user", parts}], generationConfig: {temperature: 0, maxOutputTokens: 2048}};
+  if (opts && opts.search) body.tools = [{google_search: {}}]; else body.generationConfig.responseMimeType = "application/json";
+  let r;
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+                    {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"}, body: JSON.stringify(body)});
+  } catch (e) { throw new Error("Couldn't reach Gemini from this page. Open PhishGuard in a normal browser tab, such as your own website, to use Gemini."); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("Gemini: " + ((data.error && data.error.message) || "HTTP " + r.status));
+  const c = (data.candidates || [])[0];
+  if (!c) throw new Error("Gemini didn't answer" + (data.promptFeedback && data.promptFeedback.blockReason ? " (blocked by its safety filter)." : "."));
+  const text = ((c.content || {}).parts || []).filter(x => !x.thought).map(x => x.text || "").join("");
+  const meta = c.groundingMetadata || {}, sources = [];
+  for (const ch of meta.groundingChunks || []) {
+    const w = ch.web || {};
+    if (/^https:\\/\\//.test(w.uri || "") && !sources.some(x => x.url === w.uri)) sources.push({title: String(w.title || "").slice(0, 120), url: w.uri.slice(0, 500)});
+  }
+  return {text, sources: sources.slice(0, 5), searched: (meta.webSearchQueries || []).slice(0, 4).map(q => String(q).slice(0, 120))};
+}
+const parseJson = text => { const m = /\\{[\\s\\S]*\\}/.exec(text || ""); if (!m) throw new Error("Gemini's answer wasn't in the expected format. Try again."); return JSON.parse(m[0]); };
+function lookups(scan) {
+  const out = [], dom = (/@([^>\\s]+)/.exec(scan.sender || "") || [])[1];
+  if (dom && !FREEMAIL.has(dom.toLowerCase())) out.push(dom.toLowerCase());
+  else if (!dom && /\\d{4,}/.test(scan.sender || "")) out.push(String(scan.sender).replace(/[^\\d+]/g, ""));
+  (scan.links || []).slice(0, 4).forEach(l => out.push(l.host));
+  (scan.phones || []).slice(0, 3).forEach(p => out.push(p));
+  return [...new Set(out.filter(Boolean))].join(", ").slice(0, 400);
+}
+async function askGemini(scan) {
+  const look = lookups(scan), prompt = E.aiPrompt(scan) + (look ? `\\n<lookups>${look}</lookups>` : "");
+  let out;
+  try { out = await gemCall([{text: prompt + GEMINI_SEARCH_NOTE}], {search: true}); }
+  catch (e) { if (/reach Gemini|API key|permission|denied/i.test(e.message)) throw e; out = null; }
+  if (!out || !/\\{/.test(out.text)) out = {...(await gemCall([{text: prompt}], {})), sources: [], searched: []};
+  return {...parseJson(out.text), sources: out.sources, searched: out.searched};
+}
+const b64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] || ""); fr.onerror = () => rej(new Error("Couldn't read that file.")); fr.readAsDataURL(blob); });
+function fromReader(raw, engine) {
+  raw = raw || {};
+  const mode = String(raw.mode || "").toLowerCase() === "email" ? "email" : "sms";
+  return {engine, mode, sender: String(raw.sender || "").slice(0, 200).trim(),
+          subject: mode === "email" ? String(raw.subject || "").slice(0, 300).trim() : "", body: String(raw.body || "").slice(0, 5000).trim(),
+          app: String(raw.app || "").slice(0, 60), app_warning: String(raw.app_warning || "").slice(0, 120),
+          readable: raw.readable !== false, notes: String(raw.notes || "").slice(0, 300),
+          headers: String(raw.reply_to || "").includes("@") ? {reply_to: String(raw.reply_to).slice(0, 200)} : null};
+}
+async function geminiReads(blob) {
+  if (blob.size > 15 * 1024 * 1024) throw new Error("That image is too large. Try a smaller screenshot.");
+  const out = await gemCall([{text: OCR_PROMPT}, {inline_data: {mime_type: blob.type || "image/png", data: await b64(blob)}}], {});
+  return fromReader(parseJson(out.text), "Gemini");
+}
+async function safeBrowsing(urls) {  // {url: kind}, or null when this key can't use Safe Browsing
+  const key = gemKey();
+  if (!key || !urls.length) return {};
+  try {
+    const r = await fetch("https://safebrowsing.googleapis.com/v4/threatMatches:find", {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"},
+      body: JSON.stringify({client: {clientId: "phishguard", clientVersion: "1.0"}, threatInfo: {
+        threatTypes: ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+        platformTypes: ["ANY_PLATFORM"], threatEntryTypes: ["URL"], threatEntries: urls.slice(0, 20).map(url => ({url}))}})});
+    if (!r.ok) { if ([400, 401, 403].includes(r.status)) ls.set(KSB, "0"); return null; }
+    const KINDS = {MALWARE: "malware", SOCIAL_ENGINEERING: "phishing", UNWANTED_SOFTWARE: "unwanted software", POTENTIALLY_HARMFUL_APPLICATION: "harmful app"};
+    const hits = {};
+    for (const m of (await r.json()).matches || []) hits[m.threat.url] = KINDS[m.threatType] || "dangerous";
+    return hits;
+  } catch (e) { return null; }
+}
+async function scanApi(body) {  // the rules scan, then Google Safe Browsing on its links when the user's key allows it
+  let s = await E.api("/api/phishguard/scan", {method: "POST", body: JSON.stringify(body)});
+  if (s && (s.links || []).length && gemKey() && ls.get(KSB) === "1") {
+    const hits = await safeBrowsing(s.links.slice(0, 6).map(l => l.url));
+    if (hits && Object.keys(hits).length) s = E.addLinkIntel(s.id, hits) || s;
+  }
+  return s;
+}
+const ocrList = () => [...(SAMPLE && LIMITS && LIMITS.images ? ["Claude"] : []), ...(gemKey() ? ["Gemini"] : []), "On-device reader"];
 window.PGA = {
-  kind: "device", statusText: "On this device", where: "In Claude, on this device", aiReady: false,
-  privacy: "Checks and history stay on this device. PDFs, email and text files are read on this device. Screenshots are read by Claude when you open PhishGuard in Claude; in any other browser they're read on this device.",
-  api: (p, o) => E.api(p, o),
+  kind: "device", statusText: "On this device", where: "In Claude, on this device",
+  get aiReady() { return !!SAMPLE || !!gemKey(); },
+  get aiName() { return SAMPLE ? "Claude" : gemKey() ? "Gemini" : "Claude"; },
+  get aiLabel() { return SAMPLE && gemKey() ? "Claude, or Gemini as backup, when you ask" : SAMPLE ? "Claude, when you ask"
+                         : gemKey() ? "Gemini (with Google Search), when you ask" : null; },
+  get safeBrowsing() { return !!gemKey() && ls.get(KSB) === "1"; },
+  get privacy() { return gemKey()
+    ? "Checks and history stay on this device. With your Gemini key, screenshots, the messages you ask Gemini about, and the links in checked messages (for Safe Browsing) are sent to Google."
+    : "Checks and history stay on this device. PDFs, email and text files are read on this device. Screenshots are read by Claude when you open PhishGuard in Claude; in any other browser they're read on this device."; },
+  insideClaude: !!(window.claude && window.claude.use),  // pages inside Claude can't reach Google, so the Gemini setting is hidden there
+  gemini: {
+    status: () => ({on: !!gemKey(), safeBrowsing: !!gemKey() && ls.get(KSB) === "1"}),
+    async save(key) {
+      if (!/^[\\w.\\-]{20,200}$/.test(key)) throw new Error("That doesn't look like an API key.");
+      const old = gemKey();
+      ls.set(KG, key);
+      try { parseJson((await gemCall([{text: 'Reply with this JSON only: {"ok": true}'}], {})).text); }
+      catch (e) { if (old) ls.set(KG, old); else lsDel(KG); throw e; }
+      ls.set(KSB, (await safeBrowsing(["https://example.com/"])) ? "1" : "0");
+      ENV.ocrEngines = ocrList();
+    },
+    remove() { lsDel(KG); lsDel(KSB); ENV.ocrEngines = ocrList(); },
+  },
+  api: (p, o) => (p.startsWith("/api/phishguard/scan") && o && o.method === "POST" ? scanApi(JSON.parse(o.body || "{}")) : E.api(p, o)),
   async session() { return {auth_required: false, authorized: true, developer: ENV.isDev(), dev_login: "local"}; },
   async devLogin() { ls.set(KD, "1"); return {status: "ok", developer: true}; },
   async devLogout() { try { localStorage.removeItem(KD); } catch (e) {} return {status: "ok", developer: false}; },
@@ -140,7 +247,7 @@ window.PGA = {
     }
     const x = window.PGMerge(parts);
     if (!x.readable && !x.notes) x.notes = "No message text found in that file.";
-    const scan = x.readable ? await E.api("/api/phishguard/scan", {method: "POST", body: JSON.stringify({...x, lang})}) : null;
+    const scan = x.readable ? await scanApi({...x, lang}) : null;
     return {extracted: x, scan};
   },
   async readFile(blob, name, kind, lang, qr, opts) {
@@ -148,6 +255,9 @@ window.PGA = {
     const claudeReads = SAMPLE && LIMITS && LIMITS.images && !(LIMITS.images.mediaTypes && blob.type && !LIMITS.images.mediaTypes.includes(blob.type))
                         && !(LIMITS.images.maxInputBytes && blob.size > LIMITS.images.maxInputBytes);
     if (kind === "image" && !claudeReads) {
+      if (gemKey()) {  // Gemini reads it; the on-device reader is the backup
+        try { return finish(await geminiReads(blob)); } catch (e) {}
+      }
       const raw = await FileText.ocrImage(blob, lang);
       x = {engine: "On-device reader", ...raw};
     } else if (kind === "image") {
@@ -156,8 +266,9 @@ window.PGA = {
       let raw;
       try { raw = await SAMPLE.json(OCR_PROMPT, {images: [blob], modelTier: "quick"}); }
       catch (e) {
-        if (e && e.code === "not_granted") { SAMPLE = null; this.aiReady = false; }
-        try { const r = await FileText.ocrImage(blob, lang); return finish({engine: "On-device reader", ...r}); }   // Claude couldn't: read it here instead
+        if (e && e.code === "not_granted") { SAMPLE = null; ENV.ocrEngines = ocrList(); }
+        if (gemKey()) { try { return finish(await geminiReads(blob)); } catch (e3) {} }   // Claude couldn't: Gemini, then this device
+        try { const r = await FileText.ocrImage(blob, lang); return finish({engine: "On-device reader", ...r}); }
         catch (e2) { throw new Error(why(e && e.code) || "Couldn't read the screenshot. Try again."); }
       }
       raw = raw || {};
@@ -181,25 +292,34 @@ window.PGA = {
     if (qr) { x.body = ((x.body || "") + "\\n\\nQR code: " + qr).trim(); x.readable = true; }
     x.readable = x.readable !== false && !!(x.body || "").trim();
     if (!x.readable && !x.notes) x.notes = "No message text found in that file.";
-    const scan = x.readable && !(opts && opts.scan === false) ? await E.api("/api/phishguard/scan", {method: "POST", body: JSON.stringify({...x, lang})}) : null;
+    const scan = x.readable && !(opts && opts.scan === false) ? await scanApi({...x, lang}) : null;
     return {extracted: x, scan};
     }
   },
   async askAI(scan) {
-    try {
-      const out = await SAMPLE.json(E.aiPrompt(scan), {modelTier: "quick"});
-      const s = E.addOpinion(scan.id, out || {});
+    let claudeErr = null;
+    if (SAMPLE) {
+      try {
+        const out = await SAMPLE.json(E.aiPrompt(scan), {modelTier: "quick"});
+        const s = E.addOpinion(scan.id, out || {});
+        if (!s) throw new Error("This check is no longer available");
+        return s;
+      } catch (e) { claudeErr = new Error(why(e && e.code) || e.message || "Couldn't get a second opinion."); if (!gemKey()) throw claudeErr; }
+    }
+    try {   // Gemini: the backup assistant, or the only one outside Claude
+      const s = E.addOpinion(scan.id, await askGemini(scan), "Gemini");
       if (!s) throw new Error("This check is no longer available");
       return s;
-    } catch (e) { throw new Error(why(e && e.code) || e.message || "Couldn't get a second opinion."); }
+    } catch (e) { throw claudeErr && !gemKey() ? claudeErr : new Error(e.message || "Couldn't get a second opinion."); }
   },
   init() {
     (async () => {
       try {
         const s = window.claude && window.claude.use ? await window.claude.use("sample") : null;
         if (s) { SAMPLE = s; LIMITS = await s.limits().catch(() => null); ENV.aiAvailable = true;
-                 ENV.ocrEngines = LIMITS && LIMITS.images ? ["Claude", "On-device reader"] : ["On-device reader"]; this.aiReady = true; }
+                 ENV.ocrEngines = ocrList(); }
       } catch (e) {}
+      ENV.ocrEngines = ocrList();
       pending = false;
       if (this.onChange) this.onChange();
     })();

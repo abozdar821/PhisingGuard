@@ -23,6 +23,10 @@ Environment
   PHISHGUARD_TOKEN    access token (required when reachable from the internet)
   ANTHROPIC_API_KEY   Claude: AI second opinion + screenshot reading   PHISHGUARD_MODEL  model id
   GEMINI_API_KEY      Gemini: AI second opinion + screenshot reading   GEMINI_MODEL      model id
+  GEMINI_SEARCH       1 (default): Gemini checks Google Search for public scam reports · 0: off
+  GOOGLE_SAFE_BROWSING_KEY  Google's dangerous-sites list (if unset, the Gemini key is tried; it works when
+                      the Safe Browsing API is enabled for that key's Google Cloud project)
+  (Keys can also go in a .env file next to this app, one KEY=value per line.)
   PHISHGUARD_OCR      auto | claude | gemini | tesseract   (default auto: tries them in that order)
   PHISHGUARD_DATA_DIR where scans.db and training.json are kept (default ./phishguard_data)
 """
@@ -88,6 +92,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 PG_MODEL = os.environ.get("PHISHGUARD_MODEL", "claude-haiku-4-5-20251001")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_SEARCH = os.environ.get("GEMINI_SEARCH", "1") != "0"  # let Gemini check Google Search for public scam reports
 OCR_MODE = os.environ.get("PHISHGUARD_OCR", "auto").lower()
 
 SEVERITY_TIERS = [(80, "critical"), (55, "high"), (30, "medium"), (10, "low"), (0, "info")]

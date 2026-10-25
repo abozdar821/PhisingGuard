@@ -116,8 +116,14 @@ with mock.patch.object(m._requests, "get", side_effect=OSError("offline")):
     check("Gemini only: one Gemini opinion", len(r["ai"]) == 1 and r["ai"][0]["provider"] == "Gemini" and r["ai"][0]["score"] == 70, r["ai"])
     check("Gemini endpoint + model in URL", "generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent" in url, url)
     check("Gemini key in header, not URL", kw["headers"]["x-goog-api-key"] == "gk-secret" and "gk-secret" not in url)
-    check("Gemini gets system instruction + JSON mode", "PhishGuard" in kw["json"]["systemInstruction"]["parts"][0]["text"]
-          and kw["json"]["generationConfig"]["responseMimeType"] == "application/json")
+    check("Gemini gets system instruction + Google Search grounding", "PhishGuard" in kw["json"]["systemInstruction"]["parts"][0]["text"]
+          and kw["json"].get("tools") == [{"google_search": {}}] and "responseMimeType" not in kw["json"]["generationConfig"], kw["json"].get("tools"))
+    m.GEMINI_SEARCH, calls = False, []
+    with mock.patch.object(m._requests, "post", side_effect=router(claude_ok, gemini_ok)):
+        scan(toll)
+    check("GEMINI_SEARCH=0: plain JSON mode, no Google Search", calls[0][1]["json"]["generationConfig"].get("responseMimeType") == "application/json"
+          and "tools" not in calls[0][1]["json"], calls[0][1]["json"].get("tools"))
+    m.GEMINI_SEARCH = True
     check("Gemini 'thought' parts ignored", "thinking" not in r["ai"][0]["reasoning"])
 
     # Both providers → averaged

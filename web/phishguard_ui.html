@@ -140,6 +140,12 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
 .box.off{border:1px solid var(--line-2);color:var(--muted)}
 .ai-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
 .ai-s{margin-left:auto;font-family:var(--mono);font-weight:600}
+.ai-src{margin-top:6px;font-size:13px;overflow-wrap:anywhere}.ai-src a{color:var(--accent)}
+.lf.bad{color:var(--t-high);font-weight:600}
+.gem{padding:4px 16px 14px;display:grid;gap:10px}.gem .note{margin:0}
+#gem-key{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line-2);border-radius:10px;color:var(--text);padding:10px 12px;font:inherit}
+#gem-key:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+#gem-on{justify-content:space-between}
 .sect{font-size:12.5px;font-weight:700;color:var(--faint);margin:6px 0 8px}
 .sec{padding:0 18px 14px}
 .flags{list-style:none}
@@ -305,6 +311,18 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
     <div class="card"><div id="history"></div></div>
     <p class="note" style="margin:0 4px 18px" data-i18n="Uploaded files aren't kept — only the text that was read from them.">Uploaded files aren't kept — only the text that was read from them.</p>
     <div class="card"><div class="card-h"><div class="card-t" data-i18n="About PhishGuard">About PhishGuard</div></div><dl class="kv" id="about"></dl></div>
+    <div class="card" id="gemini-card" hidden>
+      <div class="card-h"><div class="card-t" data-i18n="Gemini backup assistant">Gemini backup assistant</div></div>
+      <div class="gem">
+        <p class="note" data-i18n="Add your own Google Gemini API key to get Gemini's second opinion (it checks Google Search for public scam reports), Gemini reading of screenshots, and Google Safe Browsing link checks. The key is stored only in this browser.">Add your own Google Gemini API key to get Gemini's second opinion (it checks Google Search for public scam reports), Gemini reading of screenshots, and Google Safe Browsing link checks. The key is stored only in this browser.</p>
+        <form id="gem-form" class="row">
+          <input id="gem-key" type="password" autocomplete="off" spellcheck="false" dir="ltr" data-i18n-ph="Paste your Gemini API key" placeholder="Paste your Gemini API key">
+          <button class="btn sm" type="submit" data-i18n="Save">Save</button>
+        </form>
+        <div class="row" id="gem-on" hidden><span class="note" id="gem-status"></span><button class="btn sm ghost" type="button" id="gem-remove" data-i18n="Remove key">Remove key</button></div>
+        <p class="note" data-i18n="When you ask Gemini, the message is sent to Google. Get a free key at aistudio.google.com/apikey.">When you ask Gemini, the message is sent to Google. Get a free key at aistudio.google.com/apikey.</p>
+      </div>
+    </div>
     <button class="btn ghost" id="signout" hidden data-i18n="Sign out on this device">Sign out on this device</button>
   </section>
 
@@ -379,13 +397,14 @@ function applyLanguage(code, rerender) {
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll("[data-i18n-aria]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
   document.querySelectorAll("[data-i18n-alt]").forEach(el => el.setAttribute("alt", t(el.dataset.i18nAlt)));
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => el.setAttribute("placeholder", t(el.dataset.i18nPh)));
   $("lang").closest(".langpick").title = t("Language");
   setMode(PG.mode); applyTheme(currentTheme());
   if (!rerender) return;
   setStatus(!$("status").classList.contains("down"), $("status-t").dataset.key || "");
   renderExamples(); refreshReadiness();
   if (PG.current && !$("result-card").hidden) showResult(PG.current, false);
-  if (!$("view-history").hidden) { loadHistory(); loadAbout(); }
+  if (!$("view-history").hidden) { loadHistory(); loadAbout(); loadGemini(); }
   if (!$("view-training").hidden) loadTraining();
 }
 /* ── light / dark ── */
@@ -423,7 +442,7 @@ function setView(v, push = true) {
   ["signin", "check", "history", "training", "dev"].forEach(n => $("view-" + n).hidden = n !== v);
   document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
   if (push) try { history.replaceState(null, "", "#" + v); } catch (e) {}
-  if (v === "history") { loadHistory(); loadAbout(); }
+  if (v === "history") { loadHistory(); loadAbout(); loadGemini(); }
   if (v === "training") loadTraining();
   if (v === "dev") showDevPanel();
   window.scrollTo({top: 0});
@@ -637,16 +656,23 @@ function feedbackHtml(r, learned) {
     <div class="fb-s">${esc(t("Your answer trains PhishGuard for next time."))}</div>
     <div class="row"><button class="btn danger" data-fb="scam">⚠ ${esc(t("This is a scam"))}</button><button class="btn ok" data-fb="safe">✓ ${esc(t("This is safe"))}</button></div>`;
 }
+const askLabel = () => t(A.aiName === "Gemini" ? "Ask Gemini" : "Ask Claude");
+function sourcesHtml(o) {  // what Gemini looked at on Google Search
+  const src = (o.sources || []).filter(x => /^https:\/\//i.test(x.url || "")).slice(0, 5);
+  if (!src.length) return "";
+  return `<div class="ai-src"><span class="note">${esc(t("Checked on Google Search:"))}</span> ${src.map(x =>
+    `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || new URL(x.url).hostname)}</a>`).join(" · ")}</div>`;
+}
 function showResult(r, scroll) {
   PG.current = r;
   const col = SEV_HEX[r.severity] || SEV_HEX.info, C = 2 * Math.PI * 44, ops = Array.isArray(r.ai) ? r.ai : [], flags = r.flags || [];
   const ai = ops.map(o => o.score != null
     ? `<div class="box ai"><div class="ai-h"><b>🤖 ${esc(o.provider)}</b><span class="ai-s" style="color:var(--t-${sevOf(o.score)})">${Number(o.score)}/100</span></div>
-       <div>${esc(o.reasoning)}</div></div>`
+       <div>${esc(o.reasoning)}</div>${sourcesHtml(o)}</div>`
     : `<div class="box off"><b>${esc(t("{who} unavailable.", {who: o.provider}))}</b> ${esc(o.error)}</div>`).join("");
   const ask = A.askAI && A.aiReady && !ops.some(o => o.score != null)
     ? `<div class="box off row" style="justify-content:space-between"><span class="note" id="ask-note">${esc(t("Want a second opinion?"))}</span>
-       <button class="btn sm" data-ask="${esc(r.id)}">${esc(t("Ask Claude"))}</button></div>` : "";
+       <button class="btn sm" data-ask="${esc(r.id)}">${esc(askLabel())}</button></div>` : "";
   const ml = r.language && r.language.code !== "en" ? `<div class="msglang">🌐 ${esc(t("Message language: {lang}", {lang: tr(r.language.name)}))} · ${
     esc(t(RULE_LANGS.includes(r.language.code) ? "checked with {lang} scam rules" : "no {lang} rules yet — links, numbers and senders were still checked", {lang: tr(r.language.name)}))}</div>` : "";
   const line = [t("rules {n}", {n: r.heuristic_score}), ...ops.filter(o => o.score != null).map(o => `${o.provider} ${o.score}`)].join(" · ");
@@ -694,7 +720,8 @@ function linksHtml(r) {
   const row = l => {
     const c = checks.find(x => x.url === l.url), href = safeHref(l.url);
     const fin = c && c.final && c.final !== l.url ? `<div class="lf">↳ ${esc(t("Really goes to {url}", {url: c.final}))}</div>` : "";
-    const age = c && c.age_days != null ? `<div class="lf">${esc(t("Website age: {n} days", {n: c.age_days}))}</div>` : "";
+    const age = (c && c.age_days != null ? `<div class="lf">${esc(t("Website age: {n} days", {n: c.age_days}))}</div>` : "")
+      + (c && c.listed ? `<div class="lf bad">⚠ ${esc(t("On Google Safe Browsing's list of dangerous sites ({kind})", {kind: tr(c.listed)}))}</div>` : "");
     const link = (cls, label) => `<a class="btn sm ${cls}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" data-opened>${esc(label)}</a>`;
     const btns = !href ? "" : risk !== "low"
       ? `<div class="row"><button class="btn sm danger" type="button" data-dont>🛑 ${esc(t("Don't open"))}</button><button class="btn sm ghost" type="button" data-reveal>${esc(t("Open anyway"))}</button></div>
@@ -721,7 +748,7 @@ async function askAI(id) {
   if (btn) { btn.disabled = true; btn.textContent = t("Thinking…"); }
   try { const s = await A.askAI({...PG.current, ui_lang: PG.lang}); showResult(s, false); }
   catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = t("Ask Claude"); }
+    if (btn) { btn.disabled = false; btn.textContent = askLabel(); }
     if (note) note.textContent = t(e.message);
   }
 }
@@ -753,15 +780,38 @@ async function loadTraining() {
 function loadAbout() {
   const c = PG.config || {}, then = list => list.reduce((a, b) => t("{a}, then {b}", {a, b}));
   const aiNames = (c.ai_providers || []).map(p => p.name);
-  const ai = aiNames.length ? aiNames.join(" + ") : t(A.kind === "device" ? (A.aiReady ? "Claude, when you ask" : "Not available here") : "Off");
+  const ai = A.kind === "device" ? t(A.aiLabel || "Not available here")
+    : aiNames.length ? aiNames.join(" + ") + (c.ai_search ? " · " + t("Gemini checks Google Search") : "") : t("Off");
   const ocr = (c.ocr_engines || []).length ? then(c.ocr_engines.map(e => tr(e))) : t(A.kind === "device" ? "Not available here" : "Not set up");
   const trn = (c.transcribers || []).length ? then(c.transcribers) : t(A.kind === "device" ? "Paste the transcript instead" : "Not set up");
   const langs = ["English", "Spanish", "Urdu", "Roman Urdu / Hindi", "Hindi", "Arabic", "French", "Portuguese"].map(x => tr(x)).join(", ");
   const lc = c.link_checks;
   const links = lc ? [t("short links expanded"), t("website age"), ...(lc.safe_browsing ? [t("Google Safe Browsing")] : [])].join(" · ")
-    : t(A.kind === "device" ? "Offline rules on this device" : "Offline rules only");
+    : A.kind === "device" ? [t("Offline rules on this device"), ...(A.safeBrowsing ? [t("Google Safe Browsing")] : [])].join(" · ") : t("Offline rules only");
   $("about").innerHTML = [["Runs", tr(A.where)], ["Link checks", links], ["AI opinion", ai], ["Screenshots", ocr], ["Voicemail audio", trn], ["Message languages", langs], ["Privacy", tr(A.privacy)]]
     .map(([k, v]) => `<dt>${esc(t(k))}</dt><dd>${esc(v)}</dd>`).join("");
+}
+
+/* ── Gemini backup assistant (phone version: the user's own key, kept in this browser) ── */
+function loadGemini() {
+  const card = $("gemini-card");
+  card.hidden = !A.gemini || !!A.insideClaude;
+  if (card.hidden) return;
+  const g = A.gemini.status();
+  $("gem-form").hidden = g.on; $("gem-on").hidden = !g.on;
+  $("gem-status").textContent = !g.on ? "" : t(g.safeBrowsing ? "Gemini is on · Google Safe Browsing is on" : "Gemini is on · Safe Browsing isn't enabled for this key");
+}
+if ($("gem-form")) {
+  $("gem-form").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const key = $("gem-key").value.trim(), btn = ev.submitter || $("gem-form").querySelector("button");
+    if (!key) return;
+    btn.disabled = true; btn.textContent = t("Checking…");
+    try { await A.gemini.save(key); $("gem-key").value = ""; toast(t("Gemini key saved")); }
+    catch (e) { toast(t(e.message), true); }
+    finally { btn.disabled = false; btn.textContent = t("Save"); loadGemini(); if (A.onChange) A.onChange(); }
+  });
+  $("gem-remove").addEventListener("click", () => { A.gemini.remove(); toast(t("Gemini key removed")); loadGemini(); if (A.onChange) A.onChange(); });
 }
 
 /* ── developer mode ── */
@@ -885,7 +935,11 @@ async function boot() {
   else if (h === "developer") setView(PG.dev ? "training" : "dev", false);
   else setView(["history", "training"].includes(h) ? h : "check", false);
 }
-A.onChange = async () => { PG.canRead = await A.canRead(PG.config || {}); refreshReadiness(); if (PG.current) showResult(PG.current, false); };
+A.onChange = async () => {
+  try { PG.config = await call("/api/phishguard/config"); } catch (e) {}
+  PG.canRead = await A.canRead(PG.config || {}); refreshReadiness(); if (PG.current) showResult(PG.current, false);
+  if (!$("view-history").hidden) loadAbout();
+};
 initLanguage();
 A.init();
 boot();
