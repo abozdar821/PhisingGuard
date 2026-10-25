@@ -1778,27 +1778,27 @@ PG_ACTIONS = {
     "Fake recruiter (employer impersonation)": [
         "Don't reply to this address, and don't send your ID, SSN, bank details or interview availability yet.",
         "Real employers don't interview only by text chat, mail you a check, or ask you to buy equipment.",
-        "If it's fake, report it at reportfraud.ftc.gov and ic3.gov, and tell the real company."],
+        "If it's fake, report it (see where to report below) and tell the real company."],
     "Job / recruitment scam": ["Don't reply — not even \"YES I AM\" or STOP; replies confirm your number is active.",
                                "Never send your SSN, ID, or bank details for a job you didn't apply to.",
-                               "Look the company up yourself on BBB.org or its official careers page.",
-                               "Report it at reportfraud.ftc.gov, then block and delete."],
+                               "Look the company up yourself on its official website or careers page.",
+                               "Report it (see where to report below), then block and delete."],
     "Debt collection fraud": ["Don't click the payment link or call the number in the text.",
                               "Real collectors must send a written validation notice — ask for it.",
                               "Check any claimed state debt through the agency's official website.",
-                              "Report to the CFPB (consumerfinance.gov), FTC, and BBB Scam Tracker."],
+                              "Report it (see where to report below)."],
     "Gift-card scam": ["Don't buy gift cards for anyone who asks by text or email — no real boss, pastor or agency pays this way.",
                        "Contact the person on a number or address you already know.",
-                       "If you already sent codes, call the card issuer now and report at reportfraud.ftc.gov."],
+                       "If you already sent codes, call the card issuer now and report it."],
     "Investment scam (pig-butchering)": ["Stop replying — friendly “wrong number” chats are a common lead-in.",
                                          "Never move money to a platform or app a stranger recommends.",
-                                         "Report it at ic3.gov and reportfraud.ftc.gov."],
+                                         "Report it (see where to report below), especially if you sent money."],
     "Callback phishing": ["Don't call the number in the message.",
                           "Check for the charge by signing in through the official app or website.",
                           "If you already called and gave access or payment, contact your bank right away."],
     "Toll / delivery fee scam": ["Don't pay through the link — toll agencies and carriers don't collect fees by text link.",
                                  "Check your account on the official website by typing the address yourself.",
-                                 "Forward the text to 7726 and report it at ic3.gov."],
+                                 "Report the text to your mobile carrier and the authorities (see below)."],
     "Brand impersonation phishing": ["Don't click links or open attachments in this message.",
                                      "Go to the company's site by typing the address yourself.",
                                      "If you entered a password, change it now and turn on 2-factor sign-in.",
@@ -1863,11 +1863,69 @@ PG_ACTIONS["Phone scam (vishing)"] = [
     "Hang up. A real bank, agency or company won't mind you calling back.",
     "Call back using the number on your card, statement or the official website — not one the caller gave you.",
     "Never read out a code, PIN or password, pay with gift cards or crypto, or install an app because a caller asked.",
-    "If you already paid or shared details, call your bank now, then report it at reportfraud.ftc.gov."]
+    "If you already paid or shared details, call your bank now, then report it."]
+# Where to report, by country (shown under "What to do"; the app picks the country on the device).
+# "topics" pick which entries fit a result: all, sms, email, call, online, bank, debt, phishing.
+PG_REPORTING = {
+    "US": {"name": "United States", "items": [
+        {"name": "FTC: ReportFraud.ftc.gov", "url": "https://reportfraud.ftc.gov/", "topics": ["all"],
+         "what": "Report any scam, even if you didn't lose money"},
+        {"name": "FBI Internet Crime Complaint Center (IC3)", "url": "https://www.ic3.gov/", "topics": ["online", "bank"],
+         "what": "Online, crypto, investment and job scams, especially if you lost money"},
+        {"name": "Forward the text to 7726 (SPAM)", "url": "", "topics": ["sms"],
+         "what": "Tells your mobile carrier so it can block the sender"},
+        {"name": "CFPB complaint", "url": "https://www.consumerfinance.gov/complaint/", "topics": ["debt"],
+         "what": "Fake debt collectors and bank or card problems"}]},
+    "PK": {"name": "Pakistan", "items": [
+        {"name": "NCCIA (National Cyber Crime Investigation Agency)", "url": "https://complaint.nccia.gov.pk/", "phone": "1799",
+         "email": "helpdesk@nccia.gov.pk", "topics": ["all"], "what": "Online fraud, hacking, fake jobs and harassment"},
+        {"name": "PTA complaint (scam calls and SMS)", "url": "https://complaint.pta.gov.pk/RegisterComplaint", "phone": "0800-55055",
+         "topics": ["sms", "call"], "what": "Report the number to your mobile company first; PTA can block the number and phone"},
+        {"name": "State Bank of Pakistan", "url": "", "phone": "111-727-273", "email": "cpd.helpdesk@sbp.org.pk", "topics": ["bank"],
+         "what": "Bank, card or mobile-wallet fraud: call your bank first, then complain to SBP"}]},
+    "IN": {"name": "India", "items": [
+        {"name": "National Cyber Crime Reporting Portal", "url": "https://cybercrime.gov.in/", "phone": "1930", "topics": ["all"],
+         "what": "Report cyber fraud; call 1930 right away if you lost money"},
+        {"name": "Sanchar Saathi: Chakshu", "url": "https://sancharsaathi.gov.in/", "topics": ["sms", "call", "online"],
+         "what": "Report suspected fraud calls, SMS and WhatsApp messages"}]},
+    "GB": {"name": "United Kingdom", "items": [
+        {"name": "Report Fraud (formerly Action Fraud)", "url": "https://www.reportfraud.police.uk/", "phone": "0300 123 2040",
+         "topics": ["all"], "what": "England, Wales and Northern Ireland; in Scotland call Police Scotland on 101"},
+        {"name": "Forward the text to 7726", "url": "", "topics": ["sms"], "what": "Free; tells your mobile network so it can block the sender"},
+        {"name": "Forward the email to report@phishing.gov.uk", "url": "mailto:report@phishing.gov.uk", "topics": ["email"],
+         "what": "The National Cyber Security Centre takes down scam websites"}]},
+    "CA": {"name": "Canada", "items": [
+        {"name": "Canadian Anti-Fraud Centre", "url": "https://antifraudcentre-centreantifraude.ca/report-signalez-eng.htm", "topics": ["all"],
+         "what": "Report fraud and scams; also tell your local police if you lost money"},
+        {"name": "Forward the text to 7726 (SPAM)", "url": "", "topics": ["sms"], "what": "Tells your mobile carrier so it can block the sender"}]},
+    "AU": {"name": "Australia", "items": [
+        {"name": "Scamwatch (National Anti-Scam Centre)", "url": "https://www.scamwatch.gov.au/", "topics": ["all"],
+         "what": "Report scams so they can be disrupted and others warned"},
+        {"name": "ReportCyber (cyber.gov.au)", "url": "https://www.cyber.gov.au/", "topics": ["online", "bank"],
+         "what": "Report cybercrime to police, especially if you lost money"}]},
+    "OTHER": {"name": "Other countries", "items": [
+        {"name": "Your local police or national cybercrime unit", "url": "", "topics": ["all"],
+         "what": "Report it, especially if you lost money or shared personal details"},
+        {"name": "Your bank", "url": "", "topics": ["bank"], "what": "Call the number on your card right away if you paid or shared card details"},
+        {"name": "Anti-Phishing Working Group", "url": "mailto:reportphishing@apwg.org", "topics": ["email", "online"],
+         "what": "Forward phishing emails to reportphishing@apwg.org"}]},
+}
+# Which kinds of authority fit each result category (the message type is added on top: sms, email, call).
+PG_REPORT_TOPICS = {
+    "Debt collection fraud": ["debt", "bank"], "Gift-card scam": ["bank"], "Investment scam (pig-butchering)": ["online", "bank"],
+    "Crypto wallet scam": ["online", "bank"], "QR payment scam": ["bank"], "Billing / subscription scam": ["bank", "online"],
+    "Callback phishing": ["bank", "call"], "Phone scam (vishing)": ["bank", "call"], "Account or code (OTP) scam": ["bank"],
+    "Family-emergency scam": ["bank"], "Job / recruitment scam": ["online"], "Fake recruiter (employer impersonation)": ["online"],
+    "Brand impersonation phishing": ["online", "phishing"], "Spoofed email (failed authentication)": ["online", "phishing"],
+    "Suspicious link": ["online"], "Known dangerous link": ["online"], "Social media account takeover": ["online"],
+    "Toll / delivery fee scam": ["online", "bank"], "Prize or benefit scam": ["bank"], "Government impersonation": ["bank"],
+    "Utility shut-off scam": ["bank"], "Health / miracle-cure spam": ["online"],
+}
+
 PG_DEFAULT_ACTIONS = {"call": ["Hang up and call the organisation back on a number you look up yourself.",
                                "Don't share codes, passwords or payment details with a caller you didn't call.",
                                "Block the number."],
-                      "sms": ["Don't tap links or reply.", "Forward the text to 7726 (SPAM) to report it to your carrier.",
+                      "sms": ["Don't tap links or reply.", "Report it to your mobile carrier (see below).",
                               "Block the sender, then delete the message."],
                       "email": ["Don't click links or download attachments.", "Use your mail app's \"Report phishing\" button.",
                                 "Delete the message."]}

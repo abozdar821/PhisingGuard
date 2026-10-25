@@ -140,6 +140,13 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
 .box.off{border:1px solid var(--line-2);color:var(--muted)}
 .ai-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
 .ai-s{margin-left:auto;font-family:var(--mono);font-weight:600}
+.report{margin-top:12px;padding:12px 14px;border:1px solid var(--line-2);border-radius:12px;background:var(--bg)}
+.report .rh{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:6px}
+.report .rh b{font-size:14px}.report ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.report li{font-size:14px;line-height:1.4}.report .rc{display:flex;flex-wrap:wrap;gap:6px 12px;margin:2px 0}
+.report .chip{white-space:nowrap;font-size:13px}.report .rw{color:var(--muted);font-size:13px}.report a{color:var(--accent)}
+.linkbtn{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;cursor:pointer;padding:0}
+#country{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:10px;color:var(--text);padding:10px 12px;font:inherit}
 .ai-src{margin-top:6px;font-size:13px;overflow-wrap:anywhere}.ai-src a{color:var(--accent)}
 .lf.bad{color:var(--t-high);font-weight:600}
 .gem{padding:4px 16px 14px;display:grid;gap:10px}.gem .note{margin:0}
@@ -311,6 +318,13 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
     <div class="card"><div id="history"></div></div>
     <p class="note" style="margin:0 4px 18px" data-i18n="Uploaded files aren't kept — only the text that was read from them.">Uploaded files aren't kept — only the text that was read from them.</p>
     <div class="card"><div class="card-h"><div class="card-t" data-i18n="About PhishGuard">About PhishGuard</div></div><dl class="kv" id="about"></dl></div>
+    <div class="card" id="country-card">
+      <div class="card-h"><div class="card-t" data-i18n="Your country">Your country</div></div>
+      <div class="gem">
+        <p class="note" data-i18n="PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language; nothing is sent anywhere.">PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language; nothing is sent anywhere.</p>
+        <select id="country" aria-label="Your country"></select>
+      </div>
+    </div>
     <div class="card" id="gemini-card" hidden>
       <div class="card-h"><div class="card-t" data-i18n="Gemini backup assistant">Gemini backup assistant</div></div>
       <div class="gem">
@@ -404,7 +418,7 @@ function applyLanguage(code, rerender) {
   setStatus(!$("status").classList.contains("down"), $("status-t").dataset.key || "");
   renderExamples(); refreshReadiness();
   if (PG.current && !$("result-card").hidden) showResult(PG.current, false);
-  if (!$("view-history").hidden) { loadHistory(); loadAbout(); loadGemini(); }
+  if (!$("view-history").hidden) { loadHistory(); loadAbout(); loadGemini(); loadCountry(); }
   if (!$("view-training").hidden) loadTraining();
 }
 /* ── light / dark ── */
@@ -442,7 +456,7 @@ function setView(v, push = true) {
   ["signin", "check", "history", "training", "dev"].forEach(n => $("view-" + n).hidden = n !== v);
   document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", b.dataset.view === v));
   if (push) try { history.replaceState(null, "", "#" + v); } catch (e) {}
-  if (v === "history") { loadHistory(); loadAbout(); loadGemini(); }
+  if (v === "history") { loadHistory(); loadAbout(); loadGemini(); loadCountry(); }
   if (v === "training") loadTraining();
   if (v === "dev") showDevPanel();
   window.scrollTo({top: 0});
@@ -660,6 +674,53 @@ function feedbackHtml(r, learned) {
     <div class="fb-s">${esc(t("Your answer trains PhishGuard for next time."))}</div>
     <div class="row"><button class="btn danger" data-fb="scam">⚠ ${esc(t("This is a scam"))}</button><button class="btn ok" data-fb="safe">✓ ${esc(t("This is safe"))}</button></div>`;
 }
+/* ── country for "where to report" (worked out on this device, never sent anywhere) ── */
+const COUNTRY_KEY = "phishguard.country";
+const US_TZ = /^(?:America\/(?:New_York|Detroit|Kentucky\/.+|Indiana\/.+|Chicago|Menominee|North_Dakota\/.+|Denver|Boise|Phoenix|Los_Angeles|Anchorage|Juneau|Sitka|Metlakatla|Yakutat|Nome|Adak|Puerto_Rico)|Pacific\/Honolulu|US\/.+)$/;
+const CA_TZ = /^America\/(?:Toronto|Montreal|Vancouver|Edmonton|Winnipeg|Halifax|St_Johns|Regina|Moncton|Glace_Bay|Goose_Bay|Whitehorse|Dawson|Dawson_Creek|Yellowknife|Iqaluit|Swift_Current|Rankin_Inlet|Resolute|Cambridge_Bay|Inuvik|Nipigon|Thunder_Bay|Rainy_River|Atikokan|Creston|Fort_Nelson|Blanc-Sablon)$|^Canada\//;
+function detectCountry() {
+  let tz = "";
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+  if (/^Asia\/Karachi$/.test(tz)) return "PK";
+  if (/^Asia\/(?:Kolkata|Calcutta)$/.test(tz)) return "IN";
+  if (/^Europe\/(?:London|Belfast)$|^GB/.test(tz)) return "GB";
+  if (/^Australia\//.test(tz)) return "AU";
+  if (CA_TZ.test(tz)) return "CA";
+  if (US_TZ.test(tz)) return "US";
+  const langs = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ""]);
+  for (const l of langs) { const m = /-([A-Za-z]{2})$/.exec(l || ""); if (m && (PG.config && PG.config.reporting || {})[m[1].toUpperCase()]) return m[1].toUpperCase(); }
+  return "OTHER";
+}
+function savedCountry() { try { return localStorage.getItem(COUNTRY_KEY) || ""; } catch (e) { return ""; } }
+function userCountry() {
+  const rep = (PG.config && PG.config.reporting) || {}, c = savedCountry() || detectCountry();
+  return rep[c] ? c : "OTHER";
+}
+function loadCountry() {
+  const rep = (PG.config && PG.config.reporting) || {}, sel = $("country");
+  if (!sel || !Object.keys(rep).length) { if ($("country-card")) $("country-card").hidden = true; return; }
+  const auto = detectCountry();
+  sel.innerHTML = [`<option value="">${esc(t("Automatic: {country}", {country: tr((rep[auto] || rep.OTHER).name)}))}</option>`]
+    .concat(Object.entries(rep).map(([code, c]) => `<option value="${esc(code)}">${esc(tr(c.name))}</option>`)).join("");
+  sel.value = savedCountry() && rep[savedCountry()] ? savedCountry() : "";
+}
+function reportHtml(r) {
+  const rep = (PG.config && PG.config.reporting) || {}, code = userCountry(), c = rep[code];
+  if (!c || r.score < 30) return "";
+  const topics = new Set(["all", r.mode, ...(((PG.config && PG.config.report_topics) || {})[r.category] || [])]);
+  if (r.mode === "link") topics.add("online");
+  const items = c.items.filter(i => i.topics.some(x => topics.has(x))).slice(0, 4);
+  if (!items.length) return "";
+  const safe = u => /^(?:https:\/\/|mailto:)/i.test(u || "") ? u : "";
+  const li = i => {
+    const href = safe(i.url), name = href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(tr(i.name))}</a>` : `<b>${esc(tr(i.name))}</b>`;
+    const chips = [i.phone ? `<span class="chip" dir="ltr">☎ <a href="tel:${esc(i.phone.replace(/[^\d+]/g, ""))}">${esc(i.phone)}</a></span>` : "",
+                   i.email && !/^mailto:/i.test(href) ? `<span class="chip" dir="ltr">✉ <a href="mailto:${esc(i.email)}">${esc(i.email)}</a></span>` : ""].filter(Boolean).join("");
+    return `<li><div dir="auto">${name}</div>${chips ? `<div class="rc">${chips}</div>` : ""}<div class="rw" dir="auto">${esc(tr(i.what))}</div></li>`;
+  };
+  return `<div class="report"><div class="rh"><b dir="auto">${esc(t("Where to report it ({country})", {country: tr(c.name)}))}</b>
+    <button class="linkbtn" type="button" data-country>${esc(t("Change"))}</button></div><ul>${items.map(li).join("")}</ul></div>`;
+}
 const askLabel = () => t(A.aiName === "Gemini" ? "Ask Gemini" : "Ask Claude");
 function sourcesHtml(o) {  // what Gemini looked at on Google Search
   const src = (o.sources || []).filter(x => /^https:\/\//i.test(x.url || "")).slice(0, 5);
@@ -703,7 +764,7 @@ function showResult(r, scroll) {
       <span class="pts" dir="ltr" style="color:${f.points < 0 ? "var(--ok-ink)" : "var(--t-" + r.severity + ")"}">${f.points > 0 ? "+" : ""}${Number(f.points)}</span>
       <div>${esc(tr(f.text))}<span class="mod">${esc(tr(f.module))}</span></div></li>`).join("")}</ul>`
       : `<p class="note">${esc(t("No warning signs found."))}</p>`}</div>
-    <div class="sec"><div class="sect">${esc(t("What to do"))}</div><ol class="steps">${(r.actions || []).map(a => `<li>${esc(tr(a))}</li>`).join("")}</ol></div>
+    <div class="sec"><div class="sect">${esc(t("What to do"))}</div><ol class="steps">${(r.actions || []).map(a => `<li>${esc(tr(a))}</li>`).join("")}</ol>${reportHtml(r)}</div>
     <div class="fb" id="fb">${feedbackHtml(r)}</div>`;
   $("result-card").hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => { const g = $("g-fg"); if (g) g.style.strokeDashoffset = C * (1 - r.score / 100); }));
@@ -805,6 +866,11 @@ function loadGemini() {
   $("gem-form").hidden = g.on; $("gem-on").hidden = !g.on;
   $("gem-status").textContent = !g.on ? "" : t(g.safeBrowsing ? "Gemini is on · Google Safe Browsing is on" : "Gemini is on · Safe Browsing isn't enabled for this key");
 }
+$("country").addEventListener("change", () => {
+  try { if ($("country").value) localStorage.setItem(COUNTRY_KEY, $("country").value); else localStorage.removeItem(COUNTRY_KEY); } catch (e) {}
+  toast(t("Reporting advice set for {country}", {country: tr(((PG.config || {}).reporting || {})[userCountry()].name)}));
+  if (PG.current) showResult(PG.current, false);
+});
 if ($("gem-form")) {
   $("gem-form").addEventListener("submit", async ev => {
     ev.preventDefault();
@@ -850,7 +916,7 @@ $("dev-off").addEventListener("click", async () => {
 
 /* ── events ── */
 document.addEventListener("click", ev => {
-  const el = ev.target.closest("[data-view],[data-mode],[data-ex],[data-fb],[data-scan],[data-rm-value],[data-ask],[data-reveal],[data-hide],[data-dont]");
+  const el = ev.target.closest("[data-view],[data-mode],[data-ex],[data-fb],[data-scan],[data-rm-value],[data-ask],[data-reveal],[data-hide],[data-dont],[data-country]");
   if (!el) return;
   if (el.dataset.reveal !== undefined) { const w = el.closest("li").querySelector(".openwarn"); w.hidden = false; el.closest(".row").hidden = true; return; }
   if (el.dataset.hide !== undefined) { const li = el.closest("li"); li.querySelector(".openwarn").hidden = true; li.querySelector(".row").hidden = false; return; }
@@ -864,6 +930,7 @@ document.addEventListener("click", ev => {
   }
   else if (el.dataset.fb) feedback(el.dataset.fb);
   else if (el.dataset.ask) askAI(el.dataset.ask);
+  else if (el.dataset.country !== undefined) { setView("history"); setTimeout(() => { $("country-card").scrollIntoView({behavior: "smooth", block: "center"}); $("country").focus(); }, 60); }
   else if (el.dataset.scan) { const s = PG.scans.find(x => x.id === el.dataset.scan); if (s) { setView("check"); $("reading-card").hidden = true; showResult(s, true); } }
   else if (el.dataset.rmValue) {
     call("/api/phishguard/training/remove", {method: "POST", body: JSON.stringify({table: el.dataset.rmTable, kind: el.dataset.rmKind, value: el.dataset.rmValue})})

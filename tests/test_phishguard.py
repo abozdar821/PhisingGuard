@@ -1,4 +1,4 @@
-import os, sys, json, tempfile, importlib, io, subprocess, time
+import os, sys, json, tempfile, importlib, io, subprocess, time, re
 tmp = tempfile.mkdtemp(); os.environ["PHISHGUARD_DATA_DIR"] = tmp
 os.environ["PHISHGUARD_ENV_FILE"] = "0"  # tests never pick up a real .env with API keys
 for k in ("PHISHGUARD_TOKEN", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "PHISHGUARD_OCR"): os.environ.pop(k, None)
@@ -495,6 +495,20 @@ s2 = c.get("/api/phishguard/scans/" + sid).json if sid else {}
 check("WhatsApp messages shared as text → the other person's messages are checked", s2.get("category") == "Family-emergency scam" and s2.get("score", 0) >= 55, (s2.get("score"), s2.get("category")))
 check("plain text with a time in it isn't mistaken for a chat", not m.looks_like_whatsapp("Meeting moved to 3:30 PM: bring the slides\nThanks"))
 print(f"\n{len(fails)} failures (after WhatsApp checks)", fails)
+
+# ── where to report, by country ──
+cfg = c.get("/api/phishguard/config").json
+rep = cfg.get("reporting") or {}
+check("reporting advice available for the US, Pakistan and a general fallback", {"US", "PK", "OTHER"} <= set(rep), sorted(rep))
+links_ok = all((not i.get("url")) or i["url"].startswith(("https://", "mailto:")) for c_ in rep.values() for i in c_["items"])
+check("every reporting link is https:// or mailto:", links_ok)
+check("Pakistan lists NCCIA (1799) and PTA", any("NCCIA" in i["name"] and i.get("phone") == "1799" for i in rep["PK"]["items"])
+      and any("PTA" in i["name"] for i in rep["PK"]["items"]))
+us_only = re.compile(r"reportfraud\.ftc|ic3\.gov|7726|consumerfinance|BBB\.org", re.I)
+leaks = [a for lst in list(m.PG_ACTIONS.values()) + list(m.PG_DEFAULT_ACTIONS.values()) for a in lst if us_only.search(a)]
+check("general advice no longer names US-only agencies (they're in the US reporting list)", not leaks, leaks)
+check("every category with report topics is a real category", set(cfg["report_topics"]) <= set(m.PG_ACTIONS), set(cfg["report_topics"]) - set(m.PG_ACTIONS))
+print(f"\n{len(fails)} failures (after reporting checks)", fails)
 
 # ── private .env settings file ──
 import shutil as _shutil

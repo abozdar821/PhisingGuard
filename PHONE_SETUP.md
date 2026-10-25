@@ -36,6 +36,10 @@ Open `http://127.0.0.1:5001` on the computer to check it works. Then choose how 
 
 - **Claude:** `ANTHROPIC_API_KEY=sk-ant-… python phishguard.py`
 - **Gemini:** `GEMINI_API_KEY=… python phishguard.py`
+- **Where to report:** under *What to do*, PhishGuard lists the right authorities for your country (for example the FTC,
+  FBI IC3 and 7726 in the US; NCCIA 1799, PTA and the State Bank in Pakistan; also India, the UK, Canada and Australia, and
+  general advice elsewhere). The country is worked out on the device from its time zone and language — nothing is sent
+  anywhere — and you can change it under **History → Your country**.
 - **WhatsApp, Messenger and Instagram DMs:** PhishGuard can't read your chats on its own (no app can), but you can bring them in:
   a **screenshot** of the chat, **copy and paste** (several WhatsApp messages copied together are understood, and only the
   other person's messages are checked), **Share → PhishGuard** on Android, or WhatsApp's **Export chat** (⋮ / contact name →

@@ -916,7 +916,8 @@ def pg_config():
                     "link_checks": ({"expand": True, "follow_all": FOLLOW_LINKS, "domain_age": True,
                                      "safe_browsing": bool(_sb_key())} if LOOKUPS else None),
                     "ai_search": bool(GEMINI_API_KEY and GEMINI_SEARCH),
-                    "bbb_cases": [{"id": c["id"], "business": c["business"], "url": c["url"]} for c in BBB_CASES]})
+                    "bbb_cases": [{"id": c["id"], "business": c["business"], "url": c["url"]} for c in BBB_CASES],
+                    "reporting": PG_REPORTING, "report_topics": PG_REPORT_TOPICS})
 
 
 def _do_scan(mode, sender, subject, body, headers=None, lang="en", app_warning="") -> dict:
