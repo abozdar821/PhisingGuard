@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+# private settings (API keys) — never commit
+.env
 # data the apps write while running
 phishguard_data/
 soc_data/

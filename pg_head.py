@@ -53,6 +53,27 @@ from flask import Flask, Response, jsonify, redirect, request
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024  # screenshots up to ~12 MB
 
+def _load_env_file() -> None:
+    """Private settings (API keys) from a .env file next to this app: KEY=value lines. Real environment variables win."""
+    if os.environ.get("PHISHGUARD_ENV_FILE", "1") == "0":
+        return
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip().removeprefix("export ").strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_env_file()
+
 DATA_DIR = os.environ.get("PHISHGUARD_DATA_DIR",
                           os.path.join(os.path.dirname(os.path.abspath(__file__)), "phishguard_data"))
 os.makedirs(DATA_DIR, exist_ok=True)

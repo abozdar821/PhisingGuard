@@ -1,5 +1,6 @@
 import os, sys, json, tempfile, importlib, io, subprocess, time
 tmp = tempfile.mkdtemp(); os.environ["PHISHGUARD_DATA_DIR"] = tmp
+os.environ["PHISHGUARD_ENV_FILE"] = "0"  # tests never pick up a real .env with API keys
 for k in ("PHISHGUARD_TOKEN", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "PHISHGUARD_OCR"): os.environ.pop(k, None)
 os.environ["PHISHGUARD_LOOKUPS"] = "0"  # offline by default; the live link checks are tested below with a fake internet
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -411,4 +412,15 @@ check("fancy letters are read as plain text by the rules", m.fold_styled("𝗣ay
 check("a 'Daily Messenger' newspaper isn't called a Messenger impersonation",
       c.post("/api/phishguard/scan", json={"mode": "email", "sender": "The Daily Messenger <news@dailymessenger.com>", "subject": "Headlines", "body": "Today's news."}).json["score"] < 30)
 print(f"\n{len(fails)} failures (after Gmail-PDF checks)", fails)
+# ── private .env settings file ──
+import shutil as _shutil
+_d = tempfile.mkdtemp()
+_shutil.copy(os.path.join(ROOT, "phishguard.py"), _d)
+open(os.path.join(_d, ".env"), "w").write('# comment\nGEMINI_API_KEY="test-key-123"\nexport PHISHGUARD_MODEL=x\nPHISHGUARD_TOKEN=from-file\n')
+_env = {k: v for k, v in os.environ.items() if k not in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "PHISHGUARD_MODEL", "PHISHGUARD_ENV_FILE", "PHISHGUARD_DATA_DIR")}
+_env["PHISHGUARD_TOKEN"] = "from-env"
+_out = subprocess.run([sys.executable, "-c", "import phishguard as p; print(p.GEMINI_API_KEY, p.PG_MODEL, p.APP_TOKEN)"],
+                      cwd=_d, env=_env, capture_output=True, text=True, timeout=60).stdout.split()
+check(".env file next to the app supplies API keys; real environment variables win", _out == ["test-key-123", "x", "from-env"], _out)
+print(f"\n{len(fails)} failures (after .env checks)", fails)
 sys.exit(1 if fails else 0)
