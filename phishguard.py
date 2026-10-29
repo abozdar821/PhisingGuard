@@ -1670,8 +1670,10 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Known dangerous link"
     elif imp_sc >= 45:
         category = "Fake recruiter (employer impersonation)"
-    elif vish_sc >= 40 and (mode == "call" or vish_sc >= lure_sc):
+    elif vish_sc >= 40 and (mode == "call" or (vish_sc >= lure_sc and vkinds != {"code"})):
         category = "Phone scam (vishing)"
+    elif vish_sc >= 40 and vish_sc >= lure_sc and vkinds == {"code"}:
+        category = "Account or code (OTP) scam"   # a text or email asking for the code isn't a phone call
     elif hdr_sc >= 35 and any("DMARC" in f["text"] for f in flags):
         category = "Spoofed email (failed authentication)"
     elif ml_sc >= 40 and mode == "call":

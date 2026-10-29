@@ -532,6 +532,10 @@ intl = "Hi, are we still on for lunch tomorrow?"
 pk_home = sms("+923001234567", intl, country="PK"); us_home = sms("+923001234567", intl, country="US")
 check("a +92 number isn't 'international' for someone in Pakistan", not any("international" in f for f in pk_home["ftext"]), pk_home["ftext"])
 check("the same +92 number is 'international' for someone in the US", any("international" in f for f in us_home["ftext"]), us_home["ftext"])
+otp_text = sms("+923001234567", "Hi, I'm your courier. Please share the 6 digit code you just received so I can deliver your parcel")
+check("a text asking for the code is an account/code scam, not a phone scam", otp_text.get("category") == "Account or code (OTP) scam", otp_text.get("category"))
+otp_call = c.post("/api/phishguard/scan", json={"mode": "call", "sender": "+923001234567", "body": "Hi, I'm your courier. Please share the 6 digit code you just received so I can deliver your parcel"}).json
+check("…the same words on a phone call stay a phone scam", otp_call.get("category") == "Phone scam (vishing)", otp_call.get("category"))
 print(f"\n{len(fails)} failures (after Pakistan/Urdu checks)", fails)
 
 # ── private .env settings file ──
