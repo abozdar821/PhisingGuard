@@ -920,8 +920,8 @@ def pg_config():
                     "reporting": PG_REPORTING, "report_topics": PG_REPORT_TOPICS})
 
 
-def _do_scan(mode, sender, subject, body, headers=None, lang="en", app_warning="") -> dict:
-    scan = phishguard_scan(mode, sender.strip(), subject.strip(), body.strip(), headers, lang, str(app_warning or "")[:120])
+def _do_scan(mode, sender, subject, body, headers=None, lang="en", app_warning="", country="") -> dict:
+    scan = phishguard_scan(mode, sender.strip(), subject.strip(), body.strip(), headers, lang, str(app_warning or "")[:120], str(country or "")[:8])
     _save_scan(scan)
     return scan
 
@@ -938,7 +938,7 @@ def pg_scan_route():
         return jsonify({"error": "Message too long (max 5,000 characters)"}), 413
     hdrs = d.get("headers") if isinstance(d.get("headers"), dict) else None
     return jsonify(_public_scan(_do_scan(str(d.get("mode", "sms")), sender, subject, body, hdrs,
-                                          str(d.get("lang") or "en"), str(d.get("app_warning") or ""))))
+                                          str(d.get("lang") or "en"), str(d.get("app_warning") or ""), str(d.get("country") or ""))))
 
 
 MAX_FILES = 5
@@ -1009,7 +1009,8 @@ def pg_upload():
     out = {"extracted": extracted, "scan": None}
     if extracted["readable"] and request.args.get("scan", "1") == "1":
         out["scan"] = _public_scan(_do_scan(extracted["mode"], extracted["sender"], extracted["subject"], extracted["body"],
-                                            extracted.get("headers"), request.args.get("lang", "en"), extracted.get("app_warning", "")))
+                                            extracted.get("headers"), request.args.get("lang", "en"), extracted.get("app_warning", ""),
+                                            request.args.get("country", "")))
     return jsonify(out)
 
 

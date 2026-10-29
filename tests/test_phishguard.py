@@ -510,6 +510,30 @@ check("general advice no longer names US-only agencies (they're in the US report
 check("every category with report topics is a real category", set(cfg["report_topics"]) <= set(m.PG_ACTIONS), set(cfg["report_topics"]) - set(m.PG_ACTIONS))
 print(f"\n{len(fails)} failures (after reporting checks)", fails)
 
+# ── Pakistan / Urdu checks ──
+def sms(sender, body, **kw):
+    j = c.post("/api/phishguard/scan", json={"mode": "sms", "sender": sender, "body": body, **kw}).json
+    j["ftext"] = [f["text"] if isinstance(f, dict) else f for f in j.get("flags", [])]
+    return j
+bisp_fake = sms("+923001234567", "مبارک ہو! آپ کی BISP رقم 25000 روپے منظور ہو گئی ہے۔ وصول کرنے کے لیے لنک پر کلک کریں http://bisp8171-gov.online")
+check("fake BISP message (not from 8171, off-site link) → likely scam", bisp_fake.get("score", 0) >= 55
+      and any("8171" in f for f in bisp_fake["ftext"]), (bisp_fake.get("score"), bisp_fake["ftext"]))
+bisp_real = sms("8171", "Your BISP payment is ready. Visit your nearest BISP campsite with your CNIC. Details: https://bisp.gov.pk")
+check("message from the real 8171 with a bisp.gov.pk link isn't flagged", bisp_real.get("score", 100) < 30, (bisp_real.get("score"), bisp_real["ftext"]))
+challan = sms("+923451112233", "آپ کا ای چالان جاری ہو گیا ہے۔ جرمانہ آج ہی ادا کریں ورنہ لائسنس معطل ہو جائے گا: https://psca-echallan.cc/pay")
+check("fake Urdu e-challan → likely scam (Government impersonation)", challan.get("score", 0) >= 55 and challan.get("category") == "Government impersonation", (challan.get("score"), challan.get("category")))
+roman = sms("+923119876543", "Assalam o alaikum, TCS rider hun. Aap ka parcel deliver karna hai, jo code aaya hai woh bata dein please")
+check("Roman Urdu courier asking for the code → flagged", roman.get("score", 0) >= 30, (roman.get("score"), roman["ftext"]))
+apk = sms("+923001112222", "Your electricity bill is overdue. Install the official app to pay: bill-update.apk")
+check("message pushing an .apk install → flagged", any(".apk" in f or "app file" in f.lower() for f in apk["ftext"]), apk["ftext"])
+safe_ur = sms("+923004445566", "بھائی شام کو گھر آ رہے ہو؟ امی نے کھانے پر بلایا ہے")
+check("everyday Urdu message stays safe", safe_ur.get("score", 100) < 30, (safe_ur.get("score"), safe_ur["ftext"]))
+intl = "Hi, are we still on for lunch tomorrow?"
+pk_home = sms("+923001234567", intl, country="PK"); us_home = sms("+923001234567", intl, country="US")
+check("a +92 number isn't 'international' for someone in Pakistan", not any("international" in f for f in pk_home["ftext"]), pk_home["ftext"])
+check("the same +92 number is 'international' for someone in the US", any("international" in f for f in us_home["ftext"]), us_home["ftext"])
+print(f"\n{len(fails)} failures (after Pakistan/Urdu checks)", fails)
+
 # ── private .env settings file ──
 import shutil as _shutil
 _d = tempfile.mkdtemp()

@@ -38,8 +38,9 @@ Open `http://127.0.0.1:5001` on the computer to check it works. Then choose how 
 - **Gemini:** `GEMINI_API_KEY=… python phishguard.py`
 - **Where to report:** under *What to do*, PhishGuard lists the right authorities for your country (for example the FTC,
   FBI IC3 and 7726 in the US; NCCIA 1799, PTA and the State Bank in Pakistan; also India, the UK, Canada and Australia, and
-  general advice elsewhere). The country is worked out on the device from its time zone and language — nothing is sent
-  anywhere — and you can change it under **History → Your country**.
+  general advice elsewhere). The country is worked out on the device from its time zone and language, and you can change
+  it under **History → Your country**. Only the two-letter country code goes along with each check, so that a number
+  from your own country (say +92 in Pakistan) isn't treated as an international sender.
 - **WhatsApp, Messenger and Instagram DMs:** PhishGuard can't read your chats on its own (no app can), but you can bring them in:
   a **screenshot** of the chat, **copy and paste** (several WhatsApp messages copied together are understood, and only the
   other person's messages are checked), **Share → PhishGuard** on Android, or WhatsApp's **Export chat** (⋮ / contact name →
@@ -163,6 +164,11 @@ code only ever sends money).
   Hindi, Arabic, French and Portuguese. These cover code / OTP requests, blocked accounts, prize and aid
   (BISP / Ehsaas-style) fees, delivery fees, power cut-off threats, police / FIA / CBI threats, and family-emergency
   "new number" stories. Urdu, Arabic and Hindi digits are read as numbers, so call-back numbers are still caught.
+- **Pakistan-specific checks** (Urdu script, Roman Urdu and English): courier riders asking for a code, fake e-challans,
+  work-from-home "daily earning" tasks that move you to Telegram, fake FIA / PTA complaints, "it's really me, my account
+  isn't hacked" money requests, and app files (.apk) sent in messages. Real BISP messages come only from **8171** and
+  Punjab e-challans only from **8070**: a message claiming to be either from another number, or with a link off their
+  official websites, is flagged, while a genuine one from the real number with an official link is lowered.
 - For any other language it still checks links, numbers and senders, and says it has no rules for that language yet.
 - The translations were machine-assisted. Have a native speaker review them before sharing the app widely.
 

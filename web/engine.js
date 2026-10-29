@@ -398,13 +398,17 @@ function createEngine(D, env) {
     if (/balance:?\s*\$[\d,.]+.{0,40}to pay/.test(b)) M.add(15, "Balance + \"To Pay\" link — pay-now pressure");
     return M;
   }
-  function senderModule(sn, mode, styledName) {
+  function senderModule(sn, mode, styledName, homeCc) {
     const M = mod();
     if (mode === "sms" && sn.kind === "phone") {
       const v = sn.value;
       if (v.length >= 4 && v.length <= 6) M.add(10, `Short-code sender (${v}) — bulk messaging platform`);
       else if (v.length === 10 && ["800", "833", "844", "855", "866", "877", "888"].includes(v.slice(0, 3))) M.add(10, `Toll-free sender (${v.slice(0, 3)}) — common for unsolicited marketing`);
-      else if (![4, 5, 6, 10].includes(v.length)) M.add(10, "Unusual sender number length");
+      else if (![4, 5, 6, 10].includes(v.length)) {
+        if (v.length === 11 && v.startsWith("03")) { /* a Pakistani mobile number written the local way (03xx) */ }
+        else if (v.length >= 11 && v.length <= 13 && /^\s*(?:\+|00)/.test(sn.display)) { if (!(homeCc && v.startsWith(homeCc))) M.add(10, "Sent from an international number"); }
+        else M.add(10, "Unusual sender number length");
+      }
     }
     if (sn.kind === "email") {
       const dom = sn.domain, hay = (sn.display + " " + sn.value.split("@")[0]).toLowerCase();
@@ -518,6 +522,8 @@ function createEngine(D, env) {
       add(40, "Fake \"you're eligible for the blue badge\" offer, used to steal logins", "account");
     if (links.length && /\bis (?:this|that) (?:really )?(?:you|u) in (?:this|the|that) (?:video|photo|pic)|look (?:what|who) i found|(?:you|u) (?:are|r) in (?:this|the) video|everyone is (?:talking about|sharing) (?:you|this)/.test(t))
       add(30, "\"Is this you in this video?\" bait, used to steal social-media logins", "account");
+    if (/[\w-]\.apk(?![a-z])|\.(?:pdf|docx?|xlsx?|jpe?g|png)\.(?:exe|apk|scr|js|bat|com)(?![a-z])/.test(t))
+      add(45, "Sends an app or program file (.apk / .exe) dressed up as a document; installing it can hand your phone or computer to scammers", "malware");
     if (links.length && /did you (?:attempt|make|authori[sz]e)/.test(t) && /reply (?:yes|no|y|n)\b/.test(t)) add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert");
     return { M, kinds };
   }
@@ -583,6 +589,22 @@ function createEngine(D, env) {
   const after = (str, sub) => { const i = str.indexOf(sub); return i < 0 ? str : str.slice(i + sub.length); };
   const hostIn = (host, list) => list.find(h => host === h || host.endsWith("." + h)) || "";
   const BUCKETS = D.PG_BUCKET_HOSTS;
+  const OFFICIAL = D.PG_OFFICIAL_SENDERS.map(o => ({ ...o, rx: new RegExp(o.pattern) }));
+  function officialSenderModule(sn, t, links) {
+    const M = mod();
+    for (const o of OFFICIAL) {
+      if (!o.rx.test(t)) continue;
+      const offSite = links.filter(l => !hostIn(l.host, o.domains)).map(l => l.host);
+      const official = sn.kind === "phone" && o.numbers.includes(sn.value);
+      if (official && !offSite.length) M.add(-30, `Sent from the official ${o.name} number ${o.numbers[0]}`);
+      else {
+        if (sn.value && !official) M.add(25, `Real ${o.name} messages come only from ${o.numbers[0]}, not from this sender`);
+        if (offSite.length) M.add(25, `Link isn't on the official ${o.name} website: ${offSite[0]}`);
+      }
+      break;
+    }
+    return M;
+  }
   function linkModule(links, mode, b, senderDom) {
     const M = mod(), kinds = new Set();
     const add = (p, x, kind) => { M.add(p, x); if (kind) kinds.add(kind); };
@@ -744,7 +766,7 @@ function createEngine(D, env) {
             notes: body ? note : "No messages found in that WhatsApp chat export.",
             chat: {with: group ? title : other, count: keep.length, group, people: people.length}};
   }
-  function scan(mode, sender, subject, body, headers, lang, appWarning) {
+  function scan(mode, sender, subject, body, headers, lang, appWarning, country) {
     mode = ["email", "call", "link"].includes(mode) ? mode : "sms";
     if (mode !== "email") headers = null;
     const rawSender = sender, rawSubject = subject, rawBody = body;
@@ -771,7 +793,7 @@ function createEngine(D, env) {
     if (imp >= 50) hard = true;
     const job = take("Job-scam detector", jobModule(b, sn));
     const debt = take("Debt-fraud detector", debtModule(b, body, links));
-    take("Sender analysis", senderModule(sn, mode, styledName));
+    take("Sender analysis", senderModule(sn, mode, styledName, D.PG_COUNTRY_CODES[String(country || "").toUpperCase()] || ""));
     take("Content analysis", contentModule(t, subject, mode, styledText));
     const { M: linkM, kinds: lk } = linkModule(links, mode, b, sn.domain);
     const linkSc = take("Link analysis", linkM);
@@ -780,6 +802,7 @@ function createEngine(D, env) {
     const { M: vishM } = vishingModule(t);
     const vish = take("Phone-scam detector", vishM);
     const hdr = take("Email headers", headerModule(sn, headers));
+    take("Official sender check", officialSenderModule(sn, t, links));
     const { M: mlM, kinds: mk } = multilingualModule(normalizeText(t), language.code);
     const ml = take("Language rules", mlM);
     if (String(appWarning || "").trim()) { const W = mod(); W.add(15, "Your mail app had already put this message in Spam or marked it dangerous"); take("Mail app warning", W); }
@@ -801,6 +824,8 @@ function createEngine(D, env) {
     else if (ml >= 40 && (mk.has("code") || mk.has("blocked") || mk.has("verify") || mk.has("alert"))) category = "Account or code (OTP) scam";
     else if (ml >= 40 && mk.has("threat")) category = "Government impersonation";
     else if (ml >= 40 && (mk.has("family") || mk.has("newnumber"))) category = "Family-emergency scam";
+    else if (ml >= 35 && mk.has("challan")) category = "Government impersonation";
+    else if (ml >= 40 && mk.has("task")) category = "Job / recruitment scam";
     else if (job >= 25) category = "Job / recruitment scam";
     else if (lk.has("qrpay")) category = "QR payment scam";
     else if (lk.has("crypto") && linkSc >= 30) category = "Crypto wallet scam";
@@ -942,7 +967,7 @@ function createEngine(D, env) {
         if (!text.trim() && !sender.trim()) fail("Paste a message (and its sender) to scan");
         if (text.length > 5000 || sender.length > 200 || subject.length > 300) fail("Message too long (max 5,000 characters)");
         const hdrs = body.headers && typeof body.headers === "object" ? body.headers : null;
-        return clone(pub(scan(String(body.mode || "sms"), sender.trim(), subject.trim(), text.trim(), hdrs, String(body.lang || "en"), String(body.app_warning || "").slice(0, 120))));
+        return clone(pub(scan(String(body.mode || "sms"), sender.trim(), subject.trim(), text.trim(), hdrs, String(body.lang || "en"), String(body.app_warning || "").slice(0, 120), String(body.country || "").slice(0, 8))));
       }
       case "/api/phishguard/scans": return clone(scans.slice(-clamp(int("limit", 30), 1, 300)).reverse().map(pub));
       case "/api/phishguard/feedback": {

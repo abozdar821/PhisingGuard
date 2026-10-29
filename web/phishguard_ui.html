@@ -484,7 +484,7 @@ async function runCheck(mode, sender, subject, body, btn, headers, appWarning) {
   if (!body.trim() && !sender.trim()) { toast(t("Paste the message first"), true); $("f-body").focus(); return; }
   if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = t("Checking…"); }
   try {
-    const r = await call("/api/phishguard/scan", {method: "POST", body: JSON.stringify({mode, sender, subject: mode === "email" ? subject : "", body, lang: PG.lang,
+    const r = await call("/api/phishguard/scan", {method: "POST", body: JSON.stringify({mode, sender, subject: mode === "email" ? subject : "", body, lang: PG.lang, country: userCountry(),
                                                                                     ...(headers && mode === "email" ? {headers} : {}),
                                                                                     ...(appWarning ? {app_warning: appWarning} : {})})});
     showResult(r, true);
@@ -691,6 +691,7 @@ function detectCountry() {
   for (const l of langs) { const m = /-([A-Za-z]{2})$/.exec(l || ""); if (m && (PG.config && PG.config.reporting || {})[m[1].toUpperCase()]) return m[1].toUpperCase(); }
   return "OTHER";
 }
+function syncCountry() { A.country = userCountry(); }  // sent with each check, so a number from your own country isn't "international"
 function savedCountry() { try { return localStorage.getItem(COUNTRY_KEY) || ""; } catch (e) { return ""; } }
 function userCountry() {
   const rep = (PG.config && PG.config.reporting) || {}, c = savedCountry() || detectCountry();
@@ -868,6 +869,7 @@ function loadGemini() {
 }
 $("country").addEventListener("change", () => {
   try { if ($("country").value) localStorage.setItem(COUNTRY_KEY, $("country").value); else localStorage.removeItem(COUNTRY_KEY); } catch (e) {}
+  syncCountry();
   toast(t("Reporting advice set for {country}", {country: tr(((PG.config || {}).reporting || {})[userCountry()].name)}));
   if (PG.current) showResult(PG.current, false);
 });
@@ -995,7 +997,7 @@ async function boot() {
     if (e.status !== 401) { setStatus(false, "Offline"); toast(t("Can't reach your PhishGuard server right now"), true); }
     return;
   }
-  renderExamples();
+  renderExamples(); syncCountry();
   PG.canRead = await A.canRead(PG.config); refreshReadiness();
   const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("scan=")) {

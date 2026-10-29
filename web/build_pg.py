@@ -73,7 +73,7 @@ window.PGA = {
     const fd = new FormData(); fd.append("file", blob, name || "upload");
     if (qr) fd.append("qr", qr);
     let r;
-    try { r = await fetch("/api/phishguard/upload?scan=1&lang=" + encodeURIComponent(lang || "en"), {method: "POST", body: fd, credentials: "same-origin"}); }
+    try { r = await fetch("/api/phishguard/upload?scan=1&lang=" + encodeURIComponent(lang || "en") + "&country=" + encodeURIComponent(window.PGA.country || ""), {method: "POST", body: fd, credentials: "same-origin"}); }
     catch (e) { throw new Error("Can't reach your PhishGuard server"); }
     let d = null; try { d = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
@@ -84,7 +84,7 @@ window.PGA = {
     items.forEach(it => { fd.append("file", it.blob, it.name || "upload"); fd.append("qr", it.qr || ""); });
     if (progress) progress(1, items.length);
     let r;
-    try { r = await fetch("/api/phishguard/upload?scan=1&lang=" + encodeURIComponent(lang || "en"), {method: "POST", body: fd, credentials: "same-origin"}); }
+    try { r = await fetch("/api/phishguard/upload?scan=1&lang=" + encodeURIComponent(lang || "en") + "&country=" + encodeURIComponent(window.PGA.country || ""), {method: "POST", body: fd, credentials: "same-origin"}); }
     catch (e) { throw new Error("Can't reach your PhishGuard server"); }
     let d = null; try { d = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
@@ -247,7 +247,7 @@ window.PGA = {
     }
     const x = window.PGMerge(parts);
     if (!x.readable && !x.notes) x.notes = "No message text found in that file.";
-    const scan = x.readable ? await scanApi({...x, lang}) : null;
+    const scan = x.readable ? await scanApi({...x, lang, country: window.PGA.country || ""}) : null;
     return {extracted: x, scan};
   },
   async readFile(blob, name, kind, lang, qr, opts) {
@@ -297,7 +297,7 @@ window.PGA = {
     if (qr) { x.body = ((x.body || "") + "\\n\\nQR code: " + qr).trim(); x.readable = true; }
     x.readable = x.readable !== false && !!(x.body || "").trim();
     if (!x.readable && !x.notes) x.notes = "No message text found in that file.";
-    const scan = x.readable && !(opts && opts.scan === false) ? await scanApi({...x, lang}) : null;
+    const scan = x.readable && !(opts && opts.scan === false) ? await scanApi({...x, lang, country: window.PGA.country || ""}) : null;
     return {extracted: x, scan};
     }
   },
