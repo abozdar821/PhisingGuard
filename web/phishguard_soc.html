@@ -1205,8 +1205,8 @@ function createEngine(D, env) {
     const linkSc = take("Link analysis", linkM);
     const { M: lure, kinds } = lureModule(t, links, phones);
     take("Lure detector", lure);
-    const { M: vishM } = vishingModule(t);
-    const vish = take("Phone-scam detector", vishM);
+    const { M: vishM, kinds: vk } = vishingModule(t);
+    const vish = take("Phone-scam detector", vishM), onlyCode = vk.size === 1 && vk.has("code");
     const hdr = take("Email headers", headerModule(sn, headers));
     take("Official sender check", officialSenderModule(sn, t, links));
     const { M: mlM, kinds: mk } = multilingualModule(normalizeText(t), language.code);
@@ -1221,7 +1221,8 @@ function createEngine(D, env) {
     let category = null;
     if (bbb || debt >= 30) category = "Debt collection fraud";
     else if (imp >= 45) category = "Fake recruiter (employer impersonation)";
-    else if (vish >= 40 && (mode === "call" || vish >= lure.sc)) category = "Phone scam (vishing)";
+    else if (vish >= 40 && (mode === "call" || (vish >= lure.sc && !onlyCode))) category = "Phone scam (vishing)";
+    else if (vish >= 40 && vish >= lure.sc && onlyCode) category = "Account or code (OTP) scam";
     else if (hdr >= 35 && flags.some(f => f.text.includes("DMARC"))) category = "Spoofed email (failed authentication)";
     else if (ml >= 40 && mode === "call") category = "Phone scam (vishing)";
     else if (ml >= 40 && (mk.has("prize") || mk.has("aid"))) category = "Prize or benefit scam";
