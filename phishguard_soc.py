@@ -1185,7 +1185,11 @@ def _debt_module(body_l: str, body: str, links: list[dict]):
     return sc, fl
 
 
-def _sender_module(sn: dict, mode: str, styled_name: bool = False):
+# Calling codes for the countries PhishGuard knows (the app works out the user's country on the device).
+PG_COUNTRY_CODES = {"US": "1", "CA": "1", "PK": "92", "IN": "91", "GB": "44", "AU": "61"}
+
+
+def _sender_module(sn: dict, mode: str, styled_name: bool = False, home_cc: str = ""):
     sc, fl = 0, []
     def add(p, t):
         nonlocal sc
@@ -1195,7 +1199,14 @@ def _sender_module(sn: dict, mode: str, styled_name: bool = False):
         v = sn["value"]
         if 4 <= len(v) <= 6: add(10, f"Short-code sender ({v}) — bulk messaging platform")
         elif len(v) == 10 and v[:3] in ("800", "833", "844", "855", "866", "877", "888"): add(10, f"Toll-free sender ({v[:3]}) — common for unsolicited marketing")
-        elif len(v) not in (4, 5, 6, 10): add(10, "Unusual sender number length")
+        elif len(v) not in (4, 5, 6, 10):
+            if len(v) == 11 and v.startswith("03"):
+                pass  # a Pakistani mobile number written the local way (03xx)
+            elif 11 <= len(v) <= 13 and sn["display"].strip().startswith(("+", "00")):
+                if not (home_cc and v.startswith(home_cc)):  # a number from your own country is normal
+                    add(10, "Sent from an international number")
+            else:
+                add(10, "Unusual sender number length")
     if sn["kind"] == "email":
         dom, hay = sn["domain"], (sn["display"] + " " + sn["value"].split("@")[0]).lower()
         squashed = re.sub(r"[^a-z]", "", sn["display"].lower())  # "🟢Whats App" → "whatsapp"
@@ -1227,6 +1238,39 @@ def _sender_module(sn: dict, mode: str, styled_name: bool = False):
         if brand and re.search(r"support|security|help|team|appeal|verif|service|official|admin|safety|copyright", hay):
             add(25, f"Account name poses as {_brand(brand)} support; real companies don't contact you this way")
     return sc, fl
+
+
+# Official Pakistani senders: their real messages come only from these numbers and link only to these sites.
+PG_OFFICIAL_SENDERS = [
+    {"name": "BISP", "numbers": ["8171"], "domains": ["bisp.gov.pk", "gov.pk"],
+     "pattern": "(?<![a-z])(?:bisp|benazir|ehsaas|kafaalat)(?![a-z])|(?<!\\d)8171(?!\\d)|بینظیر|بے نظیر|احساس|بی آئی ایس پی|کفالت"},
+    {"name": "Punjab Safe City (e-challan)", "numbers": ["8070"], "domains": ["psca.gop.pk", "gop.pk", "punjab.gov.pk"],
+     "pattern": "(?<![a-z])e-?challan(?![a-z])|safe city|ای چالان|ای-چالان|سیف سٹی"},
+]
+
+
+def _official_sender_module(sn: dict, text_l: str, links: list[dict]):
+    sc, fl, kinds = 0, [], set()
+    def add(p, t, kind=None):
+        nonlocal sc
+        sc += p
+        fl.append((p, t))
+        if kind:
+            kinds.add(kind)
+    for o in PG_OFFICIAL_SENDERS:
+        if not re.search(o["pattern"], text_l):
+            continue
+        off_site = [ln["host"] for ln in links if not _host_in(ln["host"], o["domains"])]
+        official = sn["kind"] == "phone" and sn["value"] in o["numbers"]
+        if official and not off_site:
+            add(-30, f"Sent from the official {o['name']} number {o['numbers'][0]}")
+        else:
+            if sn["value"] and not official:
+                add(25, f"Real {o['name']} messages come only from {o['numbers'][0]}, not from this sender", "official")
+            if off_site:
+                add(25, f"Link isn't on the official {o['name']} website: {off_site[0]}", "official")
+        break
+    return sc, fl, kinds
 
 
 _ROMANCE_RE = re.compile(r"(?:near you|nearby|in your area|around you)\b[^.!?\n]{0,60}\b(?:wants? to|chat|meet|connect|reach you)|"
@@ -1352,6 +1396,8 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
         add(40, "Fake \"you're eligible for the blue badge\" offer, used to steal logins", "account")
     if links and re.search(r"\bis (?:this|that) (?:really )?(?:you|u) in (?:this|the|that) (?:video|photo|pic)|look (?:what|who) i found|(?:you|u) (?:are|r) in (?:this|the) video|everyone is (?:talking about|sharing) (?:you|this)", text_l):
         add(30, "\"Is this you in this video?\" bait, used to steal social-media logins", "account")
+    if re.search(r"[\w-]\.apk(?![a-z])|\.(?:pdf|docx?|xlsx?|jpe?g|png)\.(?:exe|apk|scr|js|bat|com)(?![a-z])", text_l):
+        add(45, "Sends an app or program file (.apk / .exe) dressed up as a document; installing it can hand your phone or computer to scammers", "malware")
     if links and re.search(r"did you (?:attempt|make|authori[sz]e)", text_l) and re.search(r"reply (?:yes|no|y|n)\b", text_l):
         add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert")
     return sc, fl, kinds
@@ -1450,10 +1496,11 @@ MULTI_LEXICON = {
             f"{_LB}(?:accidente|cárcel|carcel|fianza|hospital|detenido){_LE}", f"{_LB}(?:dinero|fianza|envía|envia|transfier)"]},
     ],
     "ur": [
-        {"kind": "utility", "points": 30, "text": "Threatens to cut off your power, water or service", "all": ["(?:بجلی|گیس|پانی|کنکشن|میٹر)", "(?:کاٹ|منقطع|بند کر)"]},
+        {"kind": "utility", "points": 30, "text": "Threatens to cut off your power, water or service", "all": ["(?:بجلی|گیس|پانی|کنکشن|میٹر(?!ک))", "(?:کاٹ|منقطع|بند کر)"]},
         {"kind": "delivery", "points": 30, "text": "Asks for a parcel, customs or delivery fee", "all": ["(?:پارسل|ڈیلیوری|کورئیر|کوریئر)", "(?:فیس|ادائیگی|کسٹم|چارجز)"]},
         {"kind": "alert", "points": 20, "text": "Unusual-activity alert used to rush you", "all": ["(?:مشکوک سرگرمی|غیر مجاز رسائی|غیر معمولی سرگرمی)"]},
-        {"kind": "code", "neg": True, "points": 40, "text": "Asks you to share a code or PIN", "all": ["(?:کوڈ|او ٹی پی|پن|otp|پاس ورڈ)", "(?:بتائیں|بتا دیں|بھیجیں|شیئر|دیں|بتائے)"]},
+        {"kind": "code", "neg": True, "points": 40, "text": "Asks you to share a code or PIN", "all": [
+            "(?:کوڈ|او ٹی پی|پن|otp|پاس ورڈ)[^۔.!؟?\n]{0,40}(?:بتائیں|بتا دیں|بھیجیں|بھیج دیں|شیئر|دیں|بتائے)"]},
         {"kind": "blocked", "points": 20, "text": "Says your account, card or SIM is blocked", "all": ["(?:اکاؤنٹ|اکاونٹ|کارڈ|سم|کھاتہ)", "(?:بند|بلاک|معطل)"]},
         {"kind": "prize", "points": 30, "text": "Announces a prize or winnings you didn't enter for", "all": ["(?:انعام|لاٹری|قرعہ اندازی|جیت|مبارک ہو)"]},
         {"kind": "aid", "points": 30, "text": "Offers a government aid payment (BISP / Ehsaas-style)", "all": ["(?:بینظیر|بے نظیر|احساس|بی آئی ایس پی|8171|امدادی رقم)"]},
@@ -1465,6 +1512,22 @@ MULTI_LEXICON = {
         {"kind": "secret", "points": 15, "text": "Asks you to keep it secret", "all": ["(?:کسی کو مت بتانا|کسی کو نہ بتانا|کسی کو مت بتائیں|کسی سے ذکر نہ)"]},
         {"kind": "family", "points": 35, "text": "Family-emergency story that ends with a money request", "all": [
             "(?:امی|ابو|بیٹا|بیٹی|بھائی|میں ہوں)", "(?:حادثہ|گرفتار|ہسپتال|تھانے)", "(?:پیسے|رقم|بھیج)"]},
+        {"kind": "code", "neg": True, "points": 30, "text": "A courier or rider asks for a code, a WhatsApp account-takeover trick", "all": [
+            "(?:کورئیر|کوریئر|پارسل|رائیڈر|ڈیلیوری|ٹی سی ایس|لیپرڈز)", "(?:کوڈ|او ٹی پی)"]},
+        {"kind": "challan", "points": 35, "text": "Traffic e-challan that asks you to pay through the message", "all": [
+            "(?:ای چالان|ای-چالان|چالان)", "(?:ادا|ادائیگی|جرمانہ|پے کریں)"]},
+        {"kind": "task", "points": 40, "text": "Work-from-home job with easy daily earnings (task scam)", "all": [
+            "(?:گھر بیٹھے|آن لائن کام|آن لائن جاب|پارٹ ٹائم)", "(?:روزانہ|کمائیں|کمائی|آمدنی)"]},
+        {"kind": "family", "points": 25, "text": "Someone you know suddenly asks for money; their WhatsApp may have been taken over", "all": [
+            "(?:مشکل میں|ایمرجنسی|پریشانی میں|مصیبت میں)", "(?:جاز کیش|ایزی پیسہ|ہزار|روپے|پیسے)"]},
+        {"kind": "malware", "points": 15, "text": "Official-looking notice that asks you to open a file", "all": [
+            "(?:نوٹیفکیشن|نوٹس|وزارت|سرکاری)", "(?:فائل|اٹیچمنٹ|ڈاؤن لوڈ)"]},
+        {"kind": "task", "points": 15, "text": "Moves you to Telegram to continue, away from the app's protections", "all": [
+            "(?:ٹیلیگرام|ٹیلی گرام)", "(?:رابطہ|جوائن|ایڈ|میسج)"]},
+        {"kind": "family", "points": 15, "text": "Insists \"it's really me\" before asking for money, a sign of a hijacked account", "all": [
+            "(?:یہ میں ہی ہوں|میں ہی ہوں|ہیک نہیں ہوا)", "(?:جاز کیش|ایزی پیسہ|ہزار|روپے|پیسے)"]},
+        {"kind": "threat", "points": 20, "text": "Claims FIA, PTA or police have a complaint or case against you", "all": [
+            "(?:ایف آئی اے|پی ٹی اے|این سی سی آئی اے|سائبر کرائم|پولیس)", "(?:آپ کے نمبر|آپ کی سم|آپ کے خلاف|شکایت|مقدمہ|ایف آئی آر)"]},
     ],
     "hi": [
         {"kind": "utility", "points": 30, "text": "Threatens to cut off your power, water or service", "all": ["(?:बिजली|कनेक्शन|गैस|पानी|मीटर)", "(?:काट|बंद कर|डिस्कनेक्ट)"]},
@@ -1489,7 +1552,21 @@ MULTI_LEXICON = {
         {"kind": "delivery", "points": 30, "text": "Asks for a parcel, customs or delivery fee", "all": [
             f"{_LB}(?:parcel|delivery|courier|package){_LE}", f"{_LB}(?:fee|fees|charges|custom|customs){_LE}"]},
         {"kind": "code", "neg": True, "points": 40, "text": "Asks you to share a code or PIN", "all": [
-            f"{_LB}(?:code|otp|pin|password){_LE}", f"{_LB}(?:bata|batayen|batain|batayein|bhej|bhejain|bhejen|share|de dein|dein){_LE}"]},
+            f"{_LB}(?:code|otp|pin|password){_LE}[^.!?\n]{{0,40}}{_LB}(?:bata|batayen|batain|batayein|bata dein|bhej|bhejain|bhejen|bhej dein|share|de dein|dein){_LE}"]},
+        {"kind": "code", "neg": True, "points": 30, "text": "A courier or rider asks for a code, a WhatsApp account-takeover trick", "all": [
+            f"{_LB}(?:courier|parcel|rider|delivery|tcs|leopards|m&p){_LE}", f"{_LB}(?:code|otp){_LE}"]},
+        {"kind": "challan", "points": 35, "text": "Traffic e-challan that asks you to pay through the message", "all": [
+            f"{_LB}(?:e-?challan|challan){_LE}", f"{_LB}(?:pay|ada|jurmana|fine){_LE}"]},
+        {"kind": "task", "points": 40, "text": "Work-from-home job with easy daily earnings (task scam)", "all": [
+            f"{_LB}(?:ghar baithe|ghar se|part time|online job|online kaam){_LE}", f"{_LB}(?:rozana|daily|roz|kamayein|kamain|kamao|kamai|income|earning){_LE}"]},
+        {"kind": "family", "points": 25, "text": "Someone you know suddenly asks for money; their WhatsApp may have been taken over", "all": [
+            f"{_LB}(?:mushkil|emergency|pareshani|musibat){_LE}", f"{_LB}(?:jazz ?cash|easy ?paisa|paise|paisay|rupay|rupees|hazar|hazaar){_LE}"]},
+        {"kind": "task", "points": 15, "text": "Moves you to Telegram to continue, away from the app's protections", "all": [
+            f"{_LB}(?:telegram|tg){_LE}", f"{_LB}(?:rabta|contact|join|add|message|msg){_LE}"]},
+        {"kind": "family", "points": 15, "text": "Insists \"it's really me\" before asking for money, a sign of a hijacked account", "all": [
+            f"{_LB}(?:main hi hun|main hi hoon|mai hi hun|hack nahi hua|hack nahi howa){_LE}", f"{_LB}(?:jazz ?cash|easy ?paisa|paise|paisay|rupay|hazar|hazaar){_LE}"]},
+        {"kind": "threat", "points": 20, "text": "Claims FIA, PTA or police have a complaint or case against you", "all": [
+            f"{_LB}(?:fia|pta|nccia|cyber ?crime|police){_LE}", f"{_LB}(?:aap ke number|aap ki sim|aap ke khilaf|shikayat|complaint|case|fir){_LE}"]},
         {"kind": "blocked", "points": 20, "text": "Says your account, card or SIM is blocked", "all": [
             f"{_LB}(?:account|card|sim|khata){_LE}", f"{_LB}(?:band|block|blocked|suspend){_LE}"]},
         {"kind": "prize", "points": 30, "text": "Announces a prize or winnings you didn't enter for", "all": [
@@ -2129,7 +2206,7 @@ def parse_whatsapp(text: str, filename: str = "") -> dict:
 
 
 def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: dict | None = None,
-                    lang: str = "en", app_warning: str = "") -> dict:
+                    lang: str = "en", app_warning: str = "", country: str = "") -> dict:
     mode = mode if mode in ("email", "call", "link") else "sms"
     if mode != "email":
         headers = None
@@ -2186,7 +2263,7 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         hard = True  # a known look-alike domain is evidence, like a BBB match
     job = take("Job-scam detector", _job_module(body_l, sn))
     debt = take("Debt-fraud detector", _debt_module(body_l, body, links))
-    sender_sc = take("Sender analysis", _sender_module(sn, mode, styled_name))
+    sender_sc = take("Sender analysis", _sender_module(sn, mode, styled_name, PG_COUNTRY_CODES.get((country or "").upper(), "")))
     take("Content analysis", _content_module(text_l, subject, mode, styled_text))
     link_sc, link_fl, lkinds = _link_module(links, mode, body_l, sn["domain"])
     take("Link analysis", (link_sc, link_fl))
@@ -2195,6 +2272,8 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
     vish_sc, vish_fl, vkinds = _vishing_module(text_l)
     take("Phone-scam detector", (vish_sc, vish_fl))
     hdr_sc = take("Email headers", _header_module(sn, headers))
+    off_sc, off_fl, okinds = _official_sender_module(sn, text_l, links)
+    take("Official sender check", (off_sc, off_fl))
     ml_sc, ml_fl, mkinds = _multilingual_module(normalize_text(text_l), language["code"])
     take("Language rules", (ml_sc, ml_fl))
     if (app_warning or "").strip():  # e.g. the screenshot shows Gmail's own "Why is this message in spam?" banner
@@ -2234,6 +2313,10 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Government impersonation"
     elif ml_sc >= 40 and mkinds & {"family", "newnumber"}:
         category = "Family-emergency scam"
+    elif ml_sc >= 35 and "challan" in mkinds:
+        category = "Government impersonation"
+    elif ml_sc >= 40 and "task" in mkinds:
+        category = "Job / recruitment scam"
     elif job >= 25:
         category = "Job / recruitment scam"
     elif "qrpay" in lkinds:
