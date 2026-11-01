@@ -507,16 +507,19 @@ async function prepareImage(file) {
   return {blob: blob || file, dataUrl: c.toDataURL("image/jpeg", 0.8), name: "screenshot.jpg"};
 }
 /* ── QR codes: decoded on this device (BarcodeDetector, or jsQR loaded on first use) ── */
-const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+// Published next to the page (ocr/jsQR.js, see fetch_ocr.sh); the CDN is only a fallback.
+const JSQR_URLS = () => [new URL("ocr/jsQR.js", location.href).href, "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"];
 let jsqrLoading = null;
 function loadJsQR() {
   if (window.jsQR) return Promise.resolve(window.jsQR);
-  return jsqrLoading || (jsqrLoading = new Promise((res, rej) => {
-    const sc = document.createElement("script"); sc.src = JSQR_URL; sc.async = true;
+  const tryLoad = src => new Promise((res, rej) => {
+    const sc = document.createElement("script"); sc.src = src; sc.async = true;
     sc.onload = () => (window.jsQR ? res(window.jsQR) : rej(new Error("QR reader didn't load")));
-    sc.onerror = () => { jsqrLoading = null; rej(new Error("QR reader didn't load")); };
+    sc.onerror = () => rej(new Error("QR reader didn't load"));
     document.head.appendChild(sc);
-  }));
+  });
+  const [local, cdn] = JSQR_URLS();
+  return jsqrLoading || (jsqrLoading = tryLoad(local).catch(() => tryLoad(cdn)).catch(e => { jsqrLoading = null; throw e; }));
 }
 async function decodeQR(file) {
   let bmp;

@@ -41,6 +41,7 @@ to turn developer mode on. See "Developer mode" in PHONE_SETUP.md for who is all
 | `web/i18n_data.py` → `web/i18n.js` | Every translation (Español, اردو, हिन्दी). |
 | `web/filetext.js` | Reads PDFs, .eml files and (without Claude) screenshots in the browser. |
 | `web/phishguard_app.html` | The built phone version (published as a Claude artifact). |
+| `web/pwa/` | Built icons and manifest that make the Vercel site installable; `web/vercel_build.sh` publishes them. |
 | `mobile/` | Native iOS/Android app (Expo) that opens the phone version or your server; see `mobile/README.md`. |
 
 Rebuild after changing anything:
