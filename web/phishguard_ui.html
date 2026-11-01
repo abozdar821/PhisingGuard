@@ -321,7 +321,7 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
     <div class="card" id="country-card">
       <div class="card-h"><div class="card-t" data-i18n="Your country">Your country</div></div>
       <div class="gem">
-        <p class="note" data-i18n="PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language; nothing is sent anywhere.">PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language; nothing is sent anywhere.</p>
+        <p class="note" data-i18n="PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language. Only the two-letter country code goes along with each check, so numbers from your own country aren't treated as foreign.">PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language. Only the two-letter country code goes along with each check, so numbers from your own country aren't treated as foreign.</p>
         <select id="country" aria-label="Your country"></select>
       </div>
     </div>
@@ -402,7 +402,7 @@ async function call(path, opts) {
 
 /* ── language ── */
 const LANG_KEY = "phishguard.lang";
-const RULE_LANGS = ["en", "es", "ur", "hi", "ur-Latn", "ar", "fr", "pt"];
+const RULE_LANGS = ["en", "es", "ur", "hi", "ur-Latn", "ar", "fr", "pt", "de"];
 function applyLanguage(code, rerender) {
   PG.lang = I.set(code);
   try { localStorage.setItem(LANG_KEY, PG.lang); } catch (e) {}
@@ -685,6 +685,7 @@ function detectCountry() {
   if (/^Asia\/(?:Kolkata|Calcutta)$/.test(tz)) return "IN";
   if (/^Europe\/(?:London|Belfast)$|^GB/.test(tz)) return "GB";
   if (/^Australia\//.test(tz)) return "AU";
+  if (/^Europe\/(?:Berlin|Busingen)$/.test(tz)) return "DE";
   if (CA_TZ.test(tz)) return "CA";
   if (US_TZ.test(tz)) return "US";
   const langs = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ""]);

@@ -406,6 +406,7 @@ function createEngine(D, env) {
       else if (v.length === 10 && ["800", "833", "844", "855", "866", "877", "888"].includes(v.slice(0, 3))) M.add(10, `Toll-free sender (${v.slice(0, 3)}) — common for unsolicited marketing`);
       else if (![4, 5, 6, 10].includes(v.length)) {
         if (v.length === 11 && v.startsWith("03")) { /* a Pakistani mobile number written the local way (03xx) */ }
+        else if (v.length >= 11 && v.length <= 12 && ["015", "016", "017"].includes(v.slice(0, 3))) { /* a German mobile number written the local way */ }
         else if (v.length >= 11 && v.length <= 13 && /^\s*(?:\+|00)/.test(sn.display)) { if (!(homeCc && v.startsWith(homeCc))) M.add(10, "Sent from an international number"); }
         else M.add(10, "Unusual sender number length");
       }
@@ -620,7 +621,7 @@ function createEngine(D, env) {
     for (const ln of links.slice(0, 6)) {
       const host = ln.host, dom = ln.domain, url = ln.url, urlL = url.toLowerCase(), tld = host.split(".").pop();
       const path = after(urlL, host);
-      if (SHORT.has(dom)) M.add(mode === "link" ? 30 : 25, `Shortened link hides the destination: ${host}`);
+      if (SHORT.has(dom) && !D.PG_GOOGLE_SHARE.includes(host)) M.add(mode === "link" ? 30 : 25, `Shortened link hides the destination: ${host}`);
       if (validIp(host)) { M.add(30, `Link points to a raw IP address: ${host}`); if (S.block[host]) M.add(30, `Link IP ${host} is on the SOC blocklist`); }
       if (BAD_TLD.has(tld)) M.add(20, `High-abuse domain ending .${tld}: ${host}`);
       if (host.startsWith("xn--") || host.includes(".xn--")) M.add(20, `Punycode (look-alike characters) domain: ${host}`);

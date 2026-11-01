@@ -1,13 +1,13 @@
 """PhishGuard translations → web/i18n.js.
 
-Each row is [English, Español, اردو, हिन्दी]. English is the key.
+Each row is [English, Español, اردو, हिन्दी]. English is the key. German (Deutsch) lives in i18n_de.py, keyed by the English text.
   • UI strings may use named placeholders: {n}, {msg} … (filled by t(key, vars)).
   • Engine-output templates use {0}, {1} …; in a translation, {t0} inserts the captured text translated again.
 Machine-assisted translations — have a native speaker review them before a public release.
 """
 import json, os, re
 
-LANGS = [("en", "English", "ltr"), ("es", "Español", "ltr"), ("ur", "اردو", "rtl"), ("hi", "हिन्दी", "ltr")]
+LANGS = [("en", "English", "ltr"), ("es", "Español", "ltr"), ("ur", "اردو", "rtl"), ("hi", "हिन्दी", "ltr"), ("de", "Deutsch", "ltr")]
 
 # ── interface ────────────────────────────────────────────────────────────────
 UI = [
@@ -290,7 +290,10 @@ UI = [
     ["Anti-Phishing Working Group", "Anti-Phishing Working Group", "اینٹی فشنگ ورکنگ گروپ", "एंटी-फ़िशिंग वर्किंग ग्रुप"],
     ["Forward phishing emails to reportphishing@apwg.org", "Reenvíe los correos de phishing a reportphishing@apwg.org", "فشنگ ای میلز reportphishing@apwg.org پر فارورڈ کریں", "फ़िशिंग ईमेल reportphishing@apwg.org पर फ़ॉरवर्ड करें"],
     ["Your country", "Su país", "آپ کا ملک", "आपका देश"],
-    ["PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language; nothing is sent anywhere.", "PhishGuard sugiere dónde denunciar estafas en su país. Se determina en este dispositivo a partir de su zona horaria e idioma; no se envía nada a ningún sitio.", "PhishGuard بتاتا ہے کہ آپ کے ملک میں فراڈ کی رپورٹ کہاں کریں۔ یہ اسی ڈیوائس پر اس کے ٹائم زون اور زبان سے معلوم کیا جاتا ہے؛ کچھ بھی کہیں نہیں بھیجا جاتا۔", "PhishGuard बताता है कि आपके देश में धोखाधड़ी की रिपोर्ट कहाँ करें। यह इसी डिवाइस पर उसके टाइम ज़ोन और भाषा से पता किया जाता है; कुछ भी कहीं नहीं भेजा जाता।"],
+    ["PhishGuard suggests where to report scams in your country. It's worked out on this device from its time zone and language. Only the two-letter country code goes along with each check, so numbers from your own country aren't treated as foreign.",
+     "PhishGuard sugiere dónde denunciar estafas en su país. Se determina en este dispositivo a partir de la zona horaria y el idioma. Solo el código de país de dos letras acompaña cada revisión, para que los números de su propio país no se traten como extranjeros.",
+     "PhishGuard بتاتا ہے کہ آپ کے ملک میں فراڈ کی رپورٹ کہاں کریں۔ یہ اسی ڈیوائس پر ٹائم زون اور زبان سے طے ہوتا ہے۔ ہر جانچ کے ساتھ صرف دو حرفی ملک کا کوڈ جاتا ہے، تاکہ آپ کے اپنے ملک کے نمبر غیر ملکی نہ سمجھے جائیں۔",
+     "PhishGuard बताता है कि आपके देश में धोखाधड़ी की रिपोर्ट कहाँ करें। यह इसी डिवाइस पर टाइम ज़ोन और भाषा से तय होता है। हर जाँच के साथ सिर्फ़ दो अक्षरों का देश कोड जाता है, ताकि आपके अपने देश के नंबर विदेशी न माने जाएँ।"],
     ["Automatic: {country}", "Automático: {country}", "خودکار: {country}", "अपने-आप: {country}"],
     ["Where to report it ({country})", "Dónde denunciarlo ({country})", "رپورٹ کہاں کریں ({country})", "रिपोर्ट कहाँ करें ({country})"],
     ["Change", "Cambiar", "تبدیل کریں", "बदलें"],
@@ -586,6 +589,67 @@ RESULT = [
 
 # ── engine output: flag texts (exact) ────────────────────────────────────────
 FLAGS = [
+    ["German", "Alemán", "جرمن", "जर्मन"],
+    ["German: \"Hi Mum\" new number", "Alemán: «Hola, mamá», número nuevo", "جرمن: «ہیلو امی»، نیا نمبر", "जर्मन: «हैलो मम्मी», नया नंबर"],
+    ["Germany", "Alemania", "جرمنی", "जर्मनी"],
+    ["Says a code was sent to you by mistake and asks for it, a WhatsApp account-takeover trick",
+     "Dice que le enviaron un código por error y se lo pide: un truco para robar cuentas de WhatsApp",
+     "کہتا ہے کہ غلطی سے آپ کو کوڈ چلا گیا اور وہ مانگتا ہے، واٹس ایپ اکاؤنٹ ہتھیانے کی چال",
+     "कहता है कि गलती से आपको कोड चला गया और उसे माँगता है, WhatsApp अकाउंट हथियाने की चाल"],
+    ["Bank \"security update\" that asks you to confirm your TAN or banking app",
+     "«Actualización de seguridad» del banco que le pide confirmar su TAN o su app bancaria",
+     "بینک کی «سکیورٹی اپ ڈیٹ» جو آپ سے TAN یا بینکنگ ایپ کی تصدیق مانگتی ہے",
+     "बैंक का «सिक्योरिटी अपडेट» जो आपसे TAN या बैंकिंग ऐप की पुष्टि माँगता है"],
+    ["Claims to come from a German authority and asks for money or your details",
+     "Dice venir de una autoridad alemana y le pide dinero o sus datos",
+     "جرمن سرکاری ادارے کی طرف سے ہونے کا دعویٰ کر کے پیسے یا آپ کی معلومات مانگتا ہے",
+     "जर्मन सरकारी संस्था की ओर से होने का दावा कर पैसे या आपकी जानकारी माँगता है"],
+    ["Someone you know says their account was hacked or replaced, then asks for money or a code",
+     "Alguien que conoce dice que su cuenta fue hackeada o cambiada y luego le pide dinero o un código",
+     "کوئی جاننے والا کہتا ہے کہ اس کا اکاؤنٹ ہیک ہو گیا یا بدل گیا، پھر پیسے یا کوڈ مانگتا ہے",
+     "कोई जान-पहचान वाला कहता है कि उसका अकाउंट हैक हो गया या बदल गया, फिर पैसे या कोड माँगता है"],
+    ["Shock call: says a relative caused an accident and needs bail or money",
+     "Llamada de choque: dice que un familiar causó un accidente y necesita fianza o dinero",
+     "خوفزدہ کرنے والی کال: کہتا ہے کہ کسی رشتہ دار سے حادثہ ہو گیا اور ضمانت یا پیسے چاہییں",
+     "डराने वाली कॉल: कहता है कि किसी रिश्तेदार से दुर्घटना हो गई और ज़मानत या पैसे चाहिए"],
+    ["Fake police officer asks to collect your cash or valuables for safekeeping",
+     "Un falso policía quiere recoger su dinero en efectivo u objetos de valor «para protegerlos»",
+     "جعلی پولیس افسر آپ کی نقدی یا قیمتی چیزیں «حفاظت کے لیے» لینے آنا چاہتا ہے",
+     "नकली पुलिस अधिकारी आपकी नकदी या कीमती सामान «सुरक्षा के लिए» लेने आना चाहता है"],
+    ["Marketplace \"payment received\" link: real buyers never send a link to collect your money",
+     "Enlace de «pago recibido» en un sitio de compraventa: los compradores reales nunca envían un enlace para cobrar",
+     "خرید و فروخت کی سائٹ پر «ادائیگی موصول» والا لنک: اصلی خریدار رقم وصول کرنے کے لیے کبھی لنک نہیں بھیجتے",
+     "खरीद-बिक्री साइट पर «भुगतान प्राप्त» वाला लिंक: असली खरीदार पैसे लेने के लिए कभी लिंक नहीं भेजते"],
+    ["Brand-ambassador offer where you pay for the \"free\" product or its shipping",
+     "Oferta de «embajador de marca» en la que usted paga el producto «gratis» o su envío",
+     "«برانڈ ایمبیسیڈر» کی پیشکش جس میں «مفت» چیز یا اس کی ترسیل کے پیسے آپ دیتے ہیں",
+     "«ब्रांड एंबेसडर» का ऑफ़र जिसमें «मुफ़्त» सामान या उसकी डिलीवरी के पैसे आप देते हैं"],
+    ["Promises guaranteed or very high returns on crypto or trading",
+     "Promete ganancias garantizadas o muy altas con criptomonedas o trading",
+     "کرپٹو یا ٹریڈنگ پر یقینی یا بہت زیادہ منافع کا وعدہ کرتا ہے",
+     "क्रिप्टो या ट्रेडिंग पर पक्के या बहुत ज़्यादा मुनाफ़े का वादा करता है"],
+    ["Fake tech-support warning that your device is infected",
+     "Falso aviso de soporte técnico de que su dispositivo está infectado",
+     "جعلی ٹیک سپورٹ کی وارننگ کہ آپ کا ڈیوائس وائرس زدہ ہے",
+     "नकली टेक सपोर्ट की चेतावनी कि आपका डिवाइस संक्रमित है"],
+    ["Police Onlinewache (online report)", "Onlinewache de la policía (denuncia en línea)", "پولیس آن لائن واخے (آن لائن رپورٹ)", "पुलिस ऑनलाइनवाखे (ऑनलाइन रिपोर्ट)"],
+    ["Report fraud to your state's police online; call 110 only in an emergency",
+     "Denuncie el fraude en línea ante la policía de su estado federado; llame al 110 solo en una emergencia",
+     "اپنی ریاست کی پولیس کو آن لائن فراڈ کی رپورٹ کریں؛ 110 صرف ایمرجنسی میں ملائیں",
+     "अपने राज्य की पुलिस को ऑनलाइन धोखाधड़ी की रिपोर्ट करें; 110 सिर्फ़ आपात स्थिति में मिलाएँ"],
+    ["Verbraucherzentrale Phishing-Radar", "Phishing-Radar de la Verbraucherzentrale", "Verbraucherzentrale فشنگ ریڈار", "Verbraucherzentrale फ़िशिंग रडार"],
+    ["Forward phishing emails so others can be warned", "Reenvíe los correos de phishing para que se pueda avisar a otros",
+     "فشنگ ای میلز آگے بھیجیں تاکہ دوسروں کو خبردار کیا جا سکے", "फ़िशिंग ईमेल आगे भेजें ताकि दूसरों को सावधान किया जा सके"],
+    ["Bundesnetzagentur: problems with phone numbers", "Bundesnetzagentur: problemas con números de teléfono",
+     "Bundesnetzagentur: فون نمبروں سے متعلق مسائل", "Bundesnetzagentur: फ़ोन नंबरों से जुड़ी समस्याएँ"],
+    ["Report scam calls, SMS and messenger spam", "Denuncie llamadas fraudulentas, SMS y spam de mensajería",
+     "فراڈ کالز، SMS اور میسنجر اسپام کی رپورٹ کریں", "धोखाधड़ी वाली कॉल, SMS और मैसेंजर स्पैम की रिपोर्ट करें"],
+    ["Card and online-banking block line 116 116", "Línea de bloqueo de tarjetas y banca en línea 116 116",
+     "کارڈ اور آن لائن بینکنگ بند کرانے کی لائن 116 116", "कार्ड और ऑनलाइन बैंकिंग ब्लॉक कराने की लाइन 116 116"],
+    ["Block your card or online banking right away, then call your bank",
+     "Bloquee su tarjeta o su banca en línea de inmediato y luego llame a su banco",
+     "فوراً اپنا کارڈ یا آن لائن بینکنگ بند کرائیں، پھر اپنے بینک کو کال کریں",
+     "तुरंत अपना कार्ड या ऑनलाइन बैंकिंग ब्लॉक कराएँ, फिर अपने बैंक को कॉल करें"],
     ['"Reply STOP" — automated bulk text', 'Pide "Reply STOP": mensaje masivo automatizado', '"Reply STOP" — خودکار بلک پیغام', '"Reply STOP" — स्वचालित बल्क मैसेज'],
     ["Asks for payment by gift card, crypto, wire or a payment app", "Pide el pago con tarjetas de regalo, criptomonedas, transferencia o una app de pagos",
      "گفٹ کارڈ، کرپٹو، وائر ٹرانسفر یا پیمنٹ ایپ سے ادائیگی مانگتا ہے", "गिफ्ट कार्ड, क्रिप्टो, वायर ट्रांसफर या पेमेंट ऐप से भुगतान माँगता है"],
@@ -1161,10 +1225,15 @@ def build():
     rows = UI + RESULT + FLAGS + ACTIONS
     for r in rows + TEMPLATES:
         assert len(r) == 4 and all(isinstance(x, str) and x for x in r), r
+    from i18n_de import DE, DE_TEMPLATES
+    missing = [r[0] for r in rows if r[0] not in DE]
+    assert not missing, f"German translation missing for: {missing[:5]}"
+    assert len(DE_TEMPLATES) == len(TEMPLATES), "German templates out of step with TEMPLATES"
     exact = {}
     for r in rows:
-        exact.setdefault(r[0], r[1:])
-    data = {"langs": [{"code": c, "name": n, "dir": d} for c, n, d in LANGS], "exact": exact, "templates": TEMPLATES}
+        exact.setdefault(r[0], r[1:] + [DE[r[0]]])
+    templates = [r + [DE_TEMPLATES[i]] for i, r in enumerate(TEMPLATES)]
+    data = {"langs": [{"code": c, "name": n, "dir": d} for c, n, d in LANGS], "exact": exact, "templates": templates}
     js = ("/* PhishGuard translations — generated by i18n_data.py. Machine-assisted; native-speaker review recommended. */\n"
           "window.PGI18N = (function () {\n\"use strict\";\nconst DATA = " + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + ";\n" + RUNTIME + "})();\n")
     open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "i18n.js"), "w").write(js)
@@ -1172,7 +1241,7 @@ def build():
 
 
 RUNTIME = r"""
-const IDX = {es: 0, ur: 1, hi: 2};
+const IDX = {es: 0, ur: 1, hi: 2, de: 3};
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\\/]/g, "\\$&");
 const TPL = DATA.templates.map(row => {
   const parts = row[0].split(/(\{\d\})/);
@@ -1180,7 +1249,7 @@ const TPL = DATA.templates.map(row => {
   const src = parts.map(p => { const m = /^\{(\d)\}$/.exec(p); if (m) { order.push(+m[1]); return "(.+?)"; } return reEsc(p); }).join("");
   return {re: new RegExp("^" + src + "$"), order, out: row.slice(1)};
 });
-const LANG_NAMES = new Set(["English", "Spanish", "French", "Portuguese", "Urdu", "Hindi", "Arabic", "Persian", "Bengali", "Punjabi",
+const LANG_NAMES = new Set(["English", "Spanish", "French", "Portuguese", "Urdu", "Hindi", "Arabic", "Persian", "Bengali", "Punjabi", "German",
                             "Russian", "Chinese", "Japanese", "Korean", "Thai", "Roman Urdu / Hindi"]);
 let lang = "en";
 const iso = v => ((DATA.langs.find(l => l.code === lang) || {}).dir === "rtl" ? "\u2066" + v + "\u2069" : v);  // keep numbers/addresses left-to-right
