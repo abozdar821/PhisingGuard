@@ -205,7 +205,7 @@ def _junk(ln: str) -> bool:
 
 def parse_ocr_text(text: str, screen: bool = False) -> dict:
     """Best-effort structure for plain OCR output (no AI available). screen=True: text came from a phone screenshot."""
-    lines = [ln.strip() for ln in (text or "").splitlines()]
+    lines = [ln.strip() for ln in bounded_text(text).splitlines()]
     lines = [ln for ln in lines if ln]
     sender = subject = reply_to = app_warning = ""
     mode = "sms"
@@ -258,8 +258,10 @@ def _read_with_tesseract(data: bytes, mime: str) -> dict:
     import pytesseract
     from PIL import Image, ImageOps
     img = Image.open(io.BytesIO(data))
+    if img.width * img.height > _DOC_IMAGE_MAX:   # decompression bomb / absurd size: refuse before decoding
+        raise ValueError("That image is too large. Try a smaller screenshot.")
     img = ImageOps.exif_transpose(img).convert("L")
-    if img.width < 1200:  # upscale small screenshots for better accuracy
+    if img.width < 1200 and img.width * img.height * 4 <= 25_000_000:  # upscale small screenshots for better accuracy
         img = img.resize((img.width * 2, img.height * 2))
     if sum(img.resize((1, 1)).getdata()) < 128:  # dark-mode screenshot → invert for OCR
         img = ImageOps.invert(img)
@@ -457,8 +459,18 @@ def _fix_styled_name(name: str) -> str:
     return re.sub(f"(?<=[a-z]) (?=[{_STYLED}][a-z]?)", "", name)
 
 
+def bounded_text(text: str, limit: int = 50_000, line: int = 1000) -> str:
+    """Real messages are short: keep the first 50,000 characters and break very long lines, so the layout
+    patterns below stay fast on hostile uploads (a 12 MB file of one endless line)."""
+    out = []
+    for ln in (text or "")[:limit].splitlines():
+        out.extend(ln[i:i + line] for i in range(0, len(ln), line)) if len(ln) > line else out.append(ln)
+    return "\n".join(out)
+
+
 def parse_mail_print(text: str) -> dict | None:
     """Email printed to PDF from Gmail / Outlook: subject, then 'Name <addr>  date', Reply-to:, To:, body."""
+    text = bounded_text(text)
     lines = [ln.rstrip() for ln in (text or "").splitlines()]
     for n in range(min(len(lines), 30)):  # the date printed in a column to the right of the sender
         lines[n] = _DATE_COLUMN.sub("", lines[n])
@@ -1070,8 +1082,40 @@ def _developer() -> bool:
 DEV_PATHS = {"/api/phishguard/training", "/api/phishguard/training/remove"}
 
 
+# Host names a browser may use to reach PhishGuard when no token is set (anything else could be DNS rebinding).
+EXTRA_HOSTS = {h.strip().lower() for h in os.environ.get("PHISHGUARD_HOSTS", "").split(",") if h.strip()}
+
+
+def _known_host() -> bool:
+    host = (request.host or "").rsplit(":", 1)[0].strip("[]").lower() if not (request.host or "").startswith("[") \
+        else (request.host or "")[1:].split("]")[0].lower()
+    if not host or host in EXTRA_HOSTS or host == "localhost" or host.endswith((".local", ".ts.net", ".localhost")):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _cross_site_write() -> bool:
+    """A state-changing request sent by another website (CSRF)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return False
+    if request.headers.get("Sec-Fetch-Site", "") == "cross-site":
+        return True
+    origin = request.headers.get("Origin", "")
+    if not origin or (origin == "null" and request.path == "/share"):
+        return False
+    return urlparse(origin).netloc.lower() != (request.host or "").lower()
+
+
 @app.before_request
 def _guard():
+    if _cross_site_write():
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    if not APP_TOKEN and not _known_host():
+        return jsonify({"error": "Unknown host name. Set PHISHGUARD_HOSTS to the name you use, or set PHISHGUARD_TOKEN."}), 403
     if request.path in OPEN_PATHS:
         return None
     if not _authorized():
@@ -1087,6 +1131,8 @@ def _guard():
 def _headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Frame-Options", "DENY")   # no clickjacking: PhishGuard is never shown inside another site
+    resp.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'")
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -1180,7 +1226,9 @@ def pg_config():
 
 
 def _do_scan(mode, sender, subject, body, headers=None, lang="en", app_warning="", country="") -> dict:
-    scan = phishguard_scan(mode, sender.strip(), subject.strip(), body.strip(), headers, lang, str(app_warning or "")[:120], str(country or "")[:8])
+    # every path (typed, uploaded, shared) is capped here: some rules slow down sharply on very long text
+    scan = phishguard_scan(mode, str(sender or "").strip()[:200], str(subject or "").strip()[:300], str(body or "").strip()[:5000],
+                           headers, lang, str(app_warning or "")[:120], str(country or "")[:8])
     _save_scan(scan)
     return scan
 

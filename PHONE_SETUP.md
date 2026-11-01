@@ -5,10 +5,10 @@ There are two ways to use it. Start with the first. Set up the second when you w
 | | Works right away | Your own app (`phishguard.py`) |
 |---|---|---|
 | Setup | None | 10–20 minutes |
-| Files it can read (**📎 Upload file**) | Screenshots (via Claude), PDFs, `.eml` emails, text files | The same, plus voicemail recordings (via Gemini or offline Whisper) |
+| Files it can read (**📎 Upload file**) | Screenshots (via Claude), PDFs (scanned ones too), Word documents, `.eml` emails, text files | The same, plus voicemail recordings (via Gemini or offline Whisper) |
 | Reads screenshots with | Claude inside Claude; in any other browser, an on-device reader | Claude, Gemini, or Tesseract (offline) |
 | Check a link or QR code before opening it | Yes (rules run on the phone) | Yes, plus live checks: short links expanded, website age, Google Safe Browsing |
-| Languages | Results in English, Español, اردو or हिन्दी; checks messages in 8 languages | Same |
+| Languages | Results in English, Español, اردو, हिन्दी or Deutsch; checks messages in 9 languages | Same |
 | AI second opinion | Claude, on request | Claude and/or Gemini, automatic |
 | History and training saved | On that phone | On your computer or server, shared by all your devices |
 | Share a screenshot into it (Android) | No | Yes |
@@ -16,7 +16,7 @@ There are two ways to use it. Start with the first. Set up the second when you w
 ## Option 1 — Works right away
 
 Open the published PhishGuard link in any browser, or in the **Claude app** for the best screenshot reading.
-Tap **📎 Upload file** and pick a screenshot, a PDF, an email saved as `.eml`, or a text file, or paste the
+Tap **📎 Upload file** and pick a screenshot, a PDF, a Word document, an email saved as `.eml`, or a text file, or paste the
 message. Then read the verdict. Inside Claude, screenshots are read by Claude (the first time, Claude asks you to allow it). In any other browser,
 or if you don't allow it, screenshots are read **on your phone** by an open-source reader (Tesseract.js). The first time,
 it downloads about 5–10 MB, then it's quick. Claude reads messy screenshots better; the on-device reader is fine for clear ones.
@@ -156,12 +156,12 @@ code only ever sends money).
 
 ## Languages
 
-- **Your language:** tap 🌐 at the top and choose English, Español, اردو (right-to-left) or हिन्दी. Everything changes,
+- **Your language:** tap 🌐 at the top and choose English, Español, اردو (right-to-left), हिन्दी or Deutsch. Everything changes,
   including the verdict, every warning sign and the steps to take. Claude or Gemini also write their second
   opinion in that language. Your choice is remembered on that device.
 - **The message's language:** PhishGuard detects the language a message is written in and shows it under the verdict.
   It has scam rules for English, Spanish, Urdu, Roman Urdu / Hindi (Urdu or Hindi typed in English letters),
-  Hindi, Arabic, French and Portuguese. These cover code / OTP requests, blocked accounts, prize and aid
+  Hindi, Arabic, French, Portuguese and German. These cover code / OTP requests, blocked accounts, prize and aid
   (BISP / Ehsaas-style) fees, delivery fees, power cut-off threats, police / FIA / CBI threats, and family-emergency
   "new number" stories. Urdu, Arabic and Hindi digits are read as numbers, so call-back numbers are still caught.
 - **Pakistan-specific checks** (Urdu script, Roman Urdu and English): courier riders asking for a code, fake e-challans,
@@ -169,7 +169,22 @@ code only ever sends money).
   isn't hacked" money requests, and app files (.apk) sent in messages. Real BISP messages come only from **8171** and
   Punjab e-challans only from **8070**: a message claiming to be either from another number, or with a link off their
   official websites, is flagged, while a genuine one from the real number with an official link is lowered.
+- **German checks:** "Hallo Mama, das ist meine neue Nummer", fake Sparkasse / Volksbank pushTAN "updates", DHL / Hermes
+  / DPD fee texts, Kleinanzeigen and Vinted "payment received" links, shock calls and fake police officers, Telegram
+  side jobs, crypto "guaranteed returns", fake authorities (Finanzamt, BZSt) and WhatsApp code tricks. In Germany the
+  advice points to the police Onlinewache, the Verbraucherzentrale Phishing-Radar, the Bundesnetzagentur and 116 116.
 - For any other language it still checks links, numbers and senders, and says it has no rules for that language yet.
+
+## Documents with pictures and charts
+
+- **Scanned PDFs** (pages that are only pictures) are read page by page, like screenshots (first 3 pages).
+- **A screenshot pasted into a PDF or Word document** is read too, and its text is added under "Text in pictures".
+  The 3 biggest pictures are read; logos and icons are skipped. QR codes in those pictures are read on your own
+  PhishGuard if OpenCV is installed (`pip install opencv-python-headless`).
+- **Word documents (.docx):** the text, the real web addresses behind its links, and its pictures.
+- **Charts and graphs** are left out: axis numbers, month and quarter rows don't end up in the message text.
+- Each picture read is a screenshot read (Claude, Gemini or Tesseract). To read only the text of documents, set
+  `PHISHGUARD_DOC_PICTURES=0`.
 - The translations were machine-assisted. Have a native speaker review them before sharing the app widely.
 
 ## Developer mode (for you, not your users)
@@ -197,6 +212,9 @@ training data to anyone who isn't in developer mode, so hiding the tab isn't the
   Anyone else gets "not allowed".
 - **`PHISHGUARD_TOKEN` set:** everyone needs the token, including you, once per device. Use this for any
   address reachable from the internet. Public tunnels (ngrok, Cloudflare) count as the internet.
+- Without a token, PhishGuard only answers to its IP address, `localhost`, `.local` and Tailscale (`.ts.net`) names,
+  so a malicious website can't reach it through DNS tricks. If you use another name on your home network, list it in
+  `PHISHGUARD_HOSTS` (comma-separated). Requests sent by other websites from your browser are refused.
 
 ## Privacy
 

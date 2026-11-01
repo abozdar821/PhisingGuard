@@ -4,7 +4,7 @@ Two separate apps that can share what they learn.
 
 | | What it does | Start | Guide |
 |---|---|---|---|
-| `phishguard.py` | Checks texts, emails, phone calls, links and QR codes, and uploaded files (screenshots, PDFs, .eml, voicemail) for scams, in 8 languages, with results in English, Español, اردو or हिन्दी. Installable on your phone. | `python phishguard.py` → http://127.0.0.1:5001 | PHONE_SETUP.md |
+| `phishguard.py` | Checks texts, emails, phone calls, links and QR codes, and uploaded files (screenshots, PDFs, Word documents, .eml, voicemail) for scams, in 9 languages, with results in English, Español, اردو, हिन्दी or Deutsch. Installable on your phone. | `python phishguard.py` → http://127.0.0.1:5001 | PHONE_SETUP.md |
 | `soc_dashboard.py` | Watches traffic to a server, and your own browser's traffic via the extension. | `python soc_dashboard.py` → http://127.0.0.1:5000 | BROWSER_SETUP.md |
 | `soc-browser-extension/` | Chrome / Edge / Brave extension that reports your browser's requests to the dashboard. | Load unpacked | BROWSER_SETUP.md |
 

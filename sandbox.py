@@ -879,7 +879,7 @@ class Bench:
     def message_cases(self, extra=()):
         builtin = {"harris-optin": "scam", "harris-pay": "scam", "bergen": "scam", "sandpiper": "scam",
                    "maple": "spam", "paypal": "scam", "dentist": "safe", "trailhead": "scam",
-                   "link-paypal": "scam", "qr-upi": "scam", "es-otp": "scam", "ur-bisp": "scam", "hi-kyc": "scam", "roman-urdu-call": "scam"}
+                   "link-paypal": "scam", "qr-upi": "scam", "es-otp": "scam", "ur-bisp": "scam", "hi-kyc": "scam", "roman-urdu-call": "scam", "de-mama": "scam"}
         cases = [{"name": f"{e['title']} (built-in example)", "label": builtin.get(e["key"], "safe"), **e}
                  for e in self.mod.PG_EXAMPLES]
         return cases + list(MESSAGE_CASES) + list(extra)

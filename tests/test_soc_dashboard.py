@@ -75,5 +75,19 @@ with mock.patch.object(mod._requests, "get", side_effect=OSError("no network")):
     check("demo auto-blocked brute-forcer", "203.0.113.24" in mod.BLOCKLIST)
     sevs = {e["severity"] for e in mod.logs if e.get("geo_source") == "demo"}
     check("demo spans severities", {"critical", "info"} <= sevs, sevs)
+# security: proxies, admin through a tunnel, CSRF, framing
+saved_admin = mod.ADMIN_TOKEN; mod.ADMIN_TOKEN = ""
+tun = {"REMOTE_ADDR": "127.0.0.1"}
+check("an internet visitor through a local tunnel isn't admin",
+      c.post("/api/unblock", environ_base=tun, json={"ip": "203.0.113.250"}, headers={"X-Forwarded-For": "203.0.113.7"}).status_code == 403)
+check("…nor with a faked home-network address in front",
+      c.post("/api/unblock", environ_base=tun, json={"ip": "203.0.113.250"}, headers={"X-Forwarded-For": "192.168.1.5, 203.0.113.7"}).status_code == 403)
+check("the computer itself is still admin", c.post("/api/unblock", environ_base=tun, json={"ip": "203.0.113.250"}).status_code != 403)
+with app.test_request_context("/log", environ_base=tun, headers={"X-Forwarded-For": "198.51.100.9, 203.0.113.7"}):
+    check("the logged address is the real one, not a faked one (no framing innocent IPs)", mod._get_real_ip() == "203.0.113.7", mod._get_real_ip())
+check("another website can't block or unblock addresses from an admin's browser (CSRF)",
+      c.post("/api/block", environ_base=tun, json={"ip": "8.8.8.8"}, headers={"Origin": "https://evil.example"}).status_code == 403)
+check("the dashboard can't be framed (clickjacking)", c.get("/").headers.get("X-Frame-Options") == "DENY")
+mod.ADMIN_TOKEN = saved_admin
 print(f"\n{len(fails)} failures", fails, "| rules:", mod.RULE_COUNT)
 sys.exit(1 if fails else 0)

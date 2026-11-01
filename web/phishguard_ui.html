@@ -733,6 +733,7 @@ function sourcesHtml(o) {  // what Gemini looked at on Google Search
 }
 function showResult(r, scroll) {
   PG.current = r;
+  r = {...r, severity: SEV_HEX[r.severity] ? r.severity : "info"};   // only the five known severities reach styles and class names
   const col = SEV_HEX[r.severity] || SEV_HEX.info, C = 2 * Math.PI * 44, ops = Array.isArray(r.ai) ? r.ai : [], flags = r.flags || [];
   const ai = ops.map(o => o.score != null
     ? `<div class="box ai"><div class="ai-h"><b>🤖 ${esc(o.provider)}</b><span class="ai-s" style="color:var(--t-${sevOf(o.score)})">${Number(o.score)}/100</span></div>

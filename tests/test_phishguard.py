@@ -611,6 +611,36 @@ except ImportError:
     print("SKIP QR-in-document check: OpenCV isn't installed")
 print(f"\n{len(fails)} failures (after document-picture checks)", fails)
 
+# ── security fixes: spoofed forwarding headers, CSRF, DNS rebinding, framing, oversized input ──
+saved_tok = m.APP_TOKEN; m.APP_TOKEN = ""
+sec = m.app.test_client(); tunnel = {"REMOTE_ADDR": "127.0.0.1"}
+check("a visitor can't fake a home-network address through a proxy (X-Forwarded-For spoofing)",
+      sec.get("/api/phishguard/scans", environ_base=tunnel, headers={"X-Forwarded-For": "192.168.1.5, 203.0.113.7"}).status_code == 401)
+check("…a home-network visitor behind a local proxy still gets in",
+      sec.get("/api/phishguard/scans", environ_base=tunnel, headers={"X-Forwarded-For": "192.168.1.5"}).status_code == 200)
+check("another website can't clear your history from your browser (CSRF)",
+      sec.post("/api/phishguard/scans/clear", environ_base={"REMOTE_ADDR": "192.168.1.20"}, data="x", content_type="text/plain",
+               headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}).status_code == 403)
+check("a DNS-rebinding site (unknown host name) can't read your history",
+      sec.get("/api/phishguard/scans", environ_base={"REMOTE_ADDR": "192.168.1.20"}, headers={"Host": "rebind.evil.example"}).status_code == 403)
+check("…but the computer's own address and .local names work",
+      all(sec.get("/api/phishguard/scans", environ_base={"REMOTE_ADDR": "192.168.1.20"}, headers={"Host": h}).status_code == 200 for h in ("192.168.1.10:5001", "phishguard.local")))
+hdr = sec.get("/").headers
+check("PhishGuard can't be framed by another site (clickjacking)", hdr.get("X-Frame-Options") == "DENY" and "frame-ancestors 'none'" in hdr.get("Content-Security-Policy", ""))
+m.APP_TOKEN = saved_tok
+t0 = time.time(); m._rate.clear()
+big_txt = c.post("/api/phishguard/upload?scan=1", data={"file": (io.BytesIO(b"1" * 3_000_000), "big.txt")}, content_type="multipart/form-data")
+check("a huge one-line text file is handled quickly (no slow-pattern DoS)", big_txt.status_code == 200 and time.time() - t0 < 10, round(time.time() - t0, 1))
+try:
+    from PIL import Image as _Img
+    bb = io.BytesIO(); _Img.new("L", (12000, 12000), 255).save(bb, "PNG")
+    t0 = time.time(); m._rate.clear()
+    bomb = c.post("/api/phishguard/upload?scan=1", data={"file": (io.BytesIO(bb.getvalue()), "bomb.png")}, content_type="multipart/form-data")
+    check("a decompression-bomb image is refused quickly", bomb.status_code in (422, 501) and time.time() - t0 < 5, (bomb.status_code, round(time.time() - t0, 1)))
+except ImportError:
+    pass
+print(f"\n{len(fails)} failures (after security checks)", fails)
+
 # ── private .env settings file ──
 import shutil as _shutil
 _d = tempfile.mkdtemp()
