@@ -4,8 +4,8 @@ import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 
-const APP_URL = (process.env.EXPO_PUBLIC_APP_URL || 'https://your-project.vercel.app').replace(/\/$/, '');
-const APP_ORIGIN = new URL(APP_URL).origin;
+const APP_URL = (process.env.EXPO_PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
+const APP_ORIGIN = /^https:\/\/[^/]+/i.test(APP_URL) && !APP_URL.includes('your-project') ? new URL(APP_URL).origin : null;
 
 function hostOf(url) {
   try { return new URL(url).host; } catch { return url; }
@@ -46,6 +46,15 @@ function Screen() {
     if (req.isTopFrame !== false) confirmExternal(url);
     return false;
   }, []);
+
+  if (!APP_ORIGIN) {
+    return (
+      <View style={s.center}>
+        <Text style={s.title}>PhishGuard isn't set up</Text>
+        <Text style={s.body}>This build has no PhishGuard address. Set EXPO_PUBLIC_APP_URL to your https:// address and build again.</Text>
+      </View>
+    );
+  }
 
   if (failed) {
     return (

@@ -23,7 +23,14 @@ Links in checked messages never open inside the app. Anything outside your Phish
 
 ## Build installable apps
 
+Cloud builds don't see `.env.local`, so first put your address in **both** `EXPO_PUBLIC_APP_URL` lines in `eas.json`. Then:
+
 ```bash
-npx eas-cli@latest build --platform android   # .apk / .aab
-npx eas-cli@latest build --platform ios       # needs an Apple Developer account
+npx eas-cli@latest login
+npx eas-cli@latest init                                   # once: links the app to your Expo account
+npx eas-cli@latest build --platform android --profile preview      # .apk to install directly
+npx eas-cli@latest build --platform android --profile production   # .aab for Google Play
+npx eas-cli@latest build --platform ios                   # needs an Apple Developer account
 ```
+
+When the build finishes, open its link on your Android phone and install the `.apk` (allow installs from your browser when asked).
