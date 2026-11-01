@@ -3075,6 +3075,8 @@ def session_info():
 
 @app.route("/api/login", methods=["POST"])
 def login():
+    if not _rate_ok("login", 10):
+        return jsonify({"error": "Too many sign-in attempts — wait a minute"}), 429
     token = str((request.get_json(silent=True) or {}).get("token", ""))
     if not APP_TOKEN or not hmac.compare_digest(token, APP_TOKEN):
         time.sleep(0.5)
@@ -3095,6 +3097,8 @@ def logout():
 
 @app.route("/api/dev/login", methods=["POST"])
 def dev_login():
+    if not _rate_ok("login", 10):
+        return jsonify({"error": "Too many sign-in attempts — wait a minute"}), 429
     if DEV_TOKEN:
         token = str((request.get_json(silent=True) or {}).get("token", ""))
         if not hmac.compare_digest(token, DEV_TOKEN):
@@ -3254,6 +3258,10 @@ def pg_upload():
 def share_target():
     """Android share sheet → PhishGuard (installed app). Files (one or several screenshots) are read, text is checked."""
     files = [f for f in request.files.getlist("file") + request.files.getlist("screenshot") if f and f.filename is not None]
+    if not _rate_ok("ocr" if files else "scan", 10 if files else 30):
+        return redirect("/#error=" + quote("Too many checks — wait a minute, then share again."), 303)
+    if len(files) > MAX_FILES:
+        return redirect("/#error=" + quote(f"Share up to {MAX_FILES} files at a time."), 303)
     try:
         if files:
             ex = _read_uploads(files, [])

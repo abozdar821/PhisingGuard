@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "PhishGuard",
+    "slug": "phishguard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.phishguard.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "PhishGuard reads the screenshot you choose to check it for scams.",
+        "NSCameraUsageDescription": "PhishGuard can check a photo you take of a message or QR code."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#11524C",
+        "foregroundImage": "./assets/icon.png"
+      },
+      "package": "com.phishguard.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "phishguard"
+  }
+}
