@@ -555,6 +555,62 @@ otp_call = c.post("/api/phishguard/scan", json={"mode": "call", "sender": "+9230
 check("…the same words on a phone call stay a phone scam", otp_call.get("category") == "Phone scam (vishing)", otp_call.get("category"))
 print(f"\n{len(fails)} failures (after Pakistan/Urdu checks)", fails)
 
+# ── documents with pictures and charts: scanned PDFs, screenshots pasted into PDFs / Word, chart clutter ──
+import io as _io, zipfile as _zipfile, shutil as _sh2
+check("chart axis rows are clutter", all(m.chart_noise(x) for x in ["0 20 40 60 80 100", "Jan Feb Mar Apr May Jun", "Q1 Q2 Q3 Q4", "$0 $5k $10k $15k", "10% 20% 30%"]))
+check("message lines with numbers are kept", not any(m.chart_noise(x) for x in ["Call +1 (213) 555-0187 now", "Pay $4.99 today", "Your code is 482913",
+                                                                                  "https://x.top/a 1 2 3", "Fee 2,99 EUR"]))
+ocr = m.parse_ocr_text("Text Message\nToday 9:41 AM\nJan Feb Mar Apr May Jun\n0 20 40 60\nYour parcel is held. Pay the fee: https://parcel-fee.top/x", screen=True)
+check("chart rows are dropped from screenshot text", "Jan Feb" not in ocr["body"] and "parcel-fee.top" in ocr["body"], ocr["body"])
+saved_keys = (m.ANTHROPIC_API_KEY, m.GEMINI_API_KEY)
+m.ANTHROPIC_API_KEY = m.GEMINI_API_KEY = ""   # Tesseract only, as on a server without AI keys
+if "Tesseract" in m.ocr_engines():
+    m._rate.clear()
+    j = fup("scanned_message.pdf").json
+    check("scanned PDF (pictures only) is read page by page", j.get("scan") and j["scan"]["score"] >= 55 and "(scanned PDF)" in j["extracted"]["engine"],
+          (j.get("error"), j.get("extracted", {}).get("engine")))
+    m._rate.clear()
+    j = fup("pasted_screenshot.pdf").json
+    check("screenshot pasted into a PDF is read too", j.get("scan") and j["scan"]["score"] >= 55 and "usps-redelivery-fee.top" in j["extracted"]["body"]
+          and "Text in pictures" in j["extracted"]["body"], j.get("extracted", {}).get("body", "")[:200])
+    check("…the chart in that PDF adds no axis numbers", "0 20 40" not in j["extracted"]["body"], j["extracted"]["body"][-200:])
+    m._rate.clear()
+    j = fup("account_notice.docx").json
+    ex = j.get("extracted") or {}
+    check("Word document: text, the address behind its link, and the pasted screenshot",
+          j.get("scan") and j["scan"]["score"] >= 55 and "paypal-konto-verifizierung.net" in ex.get("body", "") and "usps-redelivery-fee.top" in ex.get("body", "")
+          and ex.get("app") == "Word", (j.get("error"), ex.get("body", "")[:200]))
+else:
+    print("SKIP picture-reading checks: Tesseract isn't installed")
+m.ANTHROPIC_API_KEY, m.GEMINI_API_KEY = saved_keys
+def _docx(xml: str, extra: dict | None = None) -> bytes:
+    b = _io.BytesIO()
+    with _zipfile.ZipFile(b, "w", _zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>"); z.writestr("word/document.xml", xml)
+        for k, v in (extra or {}).items(): z.writestr(k, v)
+    return b.getvalue()
+plain = m.read_file(_docx('<w:document><w:body><w:p><w:r><w:t>Your Sparkasse online banking is blocked. Confirm at https://sparkasse-sicher.top</w:t></w:r></w:p></w:body></w:document>'), "a.docx")
+check("Word document text is read without its pictures", "sparkasse-sicher.top" in plain["body"] and plain["app"] == "Word", plain["body"])
+laughs = '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]><w:document><w:p><w:r><w:t>&c;&c;&c; hi &amp; bye</w:t></w:r></w:p></w:document>'
+t0 = time.time(); lx = m.read_file(_docx(laughs), "l.docx")
+check("Word XML entities are never expanded (billion-laughs safe)", time.time() - t0 < 2 and "aaaa" not in lx["body"] and "hi & bye" in lx["body"], lx["body"][:80])
+big = _io.BytesIO()
+with _zipfile.ZipFile(big, "w", _zipfile.ZIP_DEFLATED) as z:
+    z.writestr("word/document.xml", "<w:t>" + "0" * 30_000_000 + "</w:t>")
+try:
+    m.read_file(big.getvalue(), "bomb.docx"); bomb_ok = False
+except ValueError as exc:
+    bomb_ok = "too large" in str(exc)
+check("an oversized (zip-bomb) Word document is refused", bomb_ok and len(big.getvalue()) < 200_000, len(big.getvalue()))
+try:
+    import cv2 as _cv2  # noqa: F401
+    qr_doc = m.read_docx(_docx('<w:document><w:p><w:r><w:t>Scan to get your refund</w:t></w:r></w:p></w:document>',
+                               {"word/media/image1.png": open(os.path.join(HERE, "files", "qr_paypal.png"), "rb").read()}))
+    check("QR code pasted into a Word document is read", "QR code:" in qr_doc["body"], qr_doc["body"][-120:])
+except ImportError:
+    print("SKIP QR-in-document check: OpenCV isn't installed")
+print(f"\n{len(fails)} failures (after document-picture checks)", fails)
+
 # ── private .env settings file ──
 import shutil as _shutil
 _d = tempfile.mkdtemp()

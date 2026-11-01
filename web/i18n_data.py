@@ -589,6 +589,21 @@ RESULT = [
 
 # ── engine output: flag texts (exact) ────────────────────────────────────────
 FLAGS = [
+    ["Use a screenshot, PDF, Word document, .eml email, text file, WhatsApp chat export or voicemail recording",
+     "Use una captura de pantalla, un PDF, un documento de Word, un correo .eml, un archivo de texto, un chat exportado de WhatsApp o una grabación de buzón de voz",
+     "اسکرین شاٹ، PDF، ورڈ ڈاکیومنٹ، .eml ای میل، ٹیکسٹ فائل، واٹس ایپ چیٹ ایکسپورٹ یا وائس میل ریکارڈنگ استعمال کریں",
+     "स्क्रीनशॉट, PDF, Word दस्तावेज़, .eml ईमेल, टेक्स्ट फ़ाइल, WhatsApp चैट एक्सपोर्ट या वॉइसमेल रिकॉर्डिंग इस्तेमाल करें"],
+    ["Screenshots, PDF, Word document (.docx), email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.",
+     "Capturas de pantalla, PDF, documento de Word (.docx), archivo de correo (.eml), archivo de texto, chat exportado de WhatsApp o grabación de buzón de voz. Elija hasta 5 archivos a la vez, p. ej. varias capturas de un correo largo.",
+     "اسکرین شاٹس، PDF، ورڈ ڈاکیومنٹ (.docx)، ای میل فائل (.eml)، ٹیکسٹ فائل، واٹس ایپ چیٹ ایکسپورٹ یا وائس میل ریکارڈنگ۔ ایک ساتھ 5 فائلیں تک چنیں، مثلاً ایک لمبی ای میل کے کئی اسکرین شاٹس۔",
+     "स्क्रीनशॉट, PDF, Word दस्तावेज़ (.docx), ईमेल फ़ाइल (.eml), टेक्स्ट फ़ाइल, WhatsApp चैट एक्सपोर्ट या वॉइसमेल रिकॉर्डिंग। एक बार में 5 फ़ाइलें तक चुनें, जैसे एक लंबे ईमेल के कई स्क्रीनशॉट।"],
+    ["Word documents", "Documentos de Word", "ورڈ ڈاکیومنٹس", "Word दस्तावेज़"],
+    ["Word document", "Documento de Word", "ورڈ ڈاکیومنٹ", "Word दस्तावेज़"],
+    ["That isn't a Word document (.docx). Save it as .docx or PDF and try again.", "No es un documento de Word (.docx). Guárdelo como .docx o PDF e inténtelo de nuevo.",
+     "یہ ورڈ ڈاکیومنٹ (.docx) نہیں ہے۔ اسے .docx یا PDF کے طور پر محفوظ کر کے دوبارہ کوشش کریں۔", "यह Word दस्तावेज़ (.docx) नहीं है। इसे .docx या PDF के रूप में सेव करके फिर से कोशिश करें।"],
+    ["That Word document is too large to read here.", "Ese documento de Word es demasiado grande para leerlo aquí.", "یہ ورڈ ڈاکیومنٹ یہاں پڑھنے کے لیے بہت بڑا ہے۔", "यह Word दस्तावेज़ यहाँ पढ़ने के लिए बहुत बड़ा है।"],
+    ["Couldn't find message text in this scanned PDF. Try a screenshot of it instead.", "No se encontró texto de mensaje en este PDF escaneado. Pruebe con una captura de pantalla.",
+     "اس اسکین شدہ PDF میں پیغام کا متن نہیں ملا۔ اس کی جگہ اسکرین شاٹ آزمائیں۔", "इस स्कैन किए गए PDF में मैसेज का टेक्स्ट नहीं मिला। इसकी जगह स्क्रीनशॉट आज़माएँ।"],
     ["German", "Alemán", "جرمن", "जर्मन"],
     ["German: \"Hi Mum\" new number", "Alemán: «Hola, mamá», número nuevo", "جرمن: «ہیلو امی»، نیا نمبر", "जर्मन: «हैलो मम्मी», नया नंबर"],
     ["Germany", "Alemania", "جرمنی", "जर्मनी"],
@@ -987,6 +1002,8 @@ TEMPLATES = [
      "Los mensajes se guardan solo en su servidor. Los archivos subidos se leen y luego se descartan (las capturas las lee {0}, así que la imagen se envía a ese servicio).",
      "پیغامات صرف آپ کے سرور پر محفوظ ہوتے ہیں۔ اپ لوڈ کی گئی فائلیں پڑھ کر ضائع کر دی جاتی ہیں (اسکرین شاٹس {0} پڑھتا ہے، اس لیے تصویر اس سروس کو بھیجی جاتی ہے)۔",
      "मैसेज सिर्फ़ आपके सर्वर पर सहेजे जाते हैं। अपलोड की गई फ़ाइलें पढ़कर हटा दी जाती हैं (स्क्रीनशॉट {0} पढ़ता है, इसलिए तस्वीर उस सेवा को भेजी जाती है)।"],
+    ["{0} (scanned PDF)", "{0} (PDF escaneado)", "{0} (اسکین شدہ PDF)", "{0} (स्कैन किया गया PDF)"],
+    ["{0} (pictures)", "{0} (imágenes)", "{0} (تصاویر)", "{0} (तस्वीरें)"],
 ]
 
 ACTIONS = [

@@ -163,6 +163,76 @@ function parseWhatsApp(text, filename) {
           notes: body ? note : "No messages found in that WhatsApp chat export.",
           chat: {with: group ? title : other, count: keep.length, group, people: people.length}};
 }
+function zipEntries(buf) {  // the central directory of a .zip: names, sizes and where each file starts
+  const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) return null;
+  const entries = [];
+  let p = dv.getUint32(eocd + 16, true);
+  for (let k = 0, n = Math.min(dv.getUint16(eocd + 10, true), 2000); k < n && p + 46 <= u8.length; k++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    entries.push({name: new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl)), method: dv.getUint16(p + 10, true),
+                  csize: dv.getUint32(p + 20, true), usize: dv.getUint32(p + 24, true), off: dv.getUint32(p + 42, true)});
+    p += 46 + nl + el + cl;
+  }
+  return {u8, dv, entries};
+}
+async function zipRead(z, e, maxBytes) {  // one file out of the zip; stops at maxBytes so a zip bomb can't fill memory
+  const {u8, dv} = z;
+  if (e.usize > maxBytes || e.off + 30 > u8.length || dv.getUint32(e.off, true) !== 0x04034b50) return null;
+  const start = e.off + 30 + dv.getUint16(e.off + 26, true) + dv.getUint16(e.off + 28, true);
+  const data = u8.slice(start, start + e.csize);
+  if (e.method === 0) return data.subarray(0, maxBytes);
+  if (e.method !== 8 || typeof DecompressionStream === "undefined") return null;
+  const reader = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+  const parts = []; let size = 0;
+  try {
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > maxBytes) { reader.cancel(); return null; }
+      parts.push(value);
+    }
+  } catch (err) { return null; }
+  const out = new Uint8Array(size); let o = 0;
+  for (const x of parts) { out.set(x, o); o += x.length; }
+  return out;
+}
+const unescapeXml = s => s.replace(/&(lt|gt|quot|apos|amp|#\d+|#x[0-9a-f]+);/gi, (m, e) => ({lt: "<", gt: ">", quot: '"', apos: "'", amp: "&"})[e.toLowerCase()] ||
+  String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)));
+async function readDocx(buf) {  // a Word document: text, the addresses behind its links, its pictures. Regexes, not an XML parser: no entity tricks.
+  const z = zipEntries(buf);
+  const main = z && z.entries.find(e => e.name === "word/document.xml");
+  if (!main) return null;
+  const xmlBytes = await zipRead(z, main, 25e6);
+  if (!xmlBytes) throw new Error("That Word document is too large to read here.");
+  const xml = new TextDecoder("utf-8").decode(xmlBytes);
+  const text = xml.split(/<\/w:p>|<w:br\/>|<w:cr\/>/).map(chunk => {
+    let line = ""; const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g; let m;
+    while ((m = re.exec(chunk))) line += m[1] !== undefined ? unescapeXml(m[1]) : "\t";
+    return line.trim();
+  }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const links = [], rels = z.entries.find(e => e.name === "word/_rels/document.xml.rels");
+  const relBytes = rels ? await zipRead(z, rels, 2e6) : null;
+  if (relBytes) {
+    const rx = /<Relationship\s[^>]*>/g; let m;
+    const r = new TextDecoder().decode(relBytes);
+    while ((m = rx.exec(r))) if (/TargetMode="External"/.test(m[0])) { const t = /Target="([^"]+)"/.exec(m[0]); if (t) links.push(unescapeXml(t[1])); }
+  }
+  const images = []; let total = 0;
+  for (const e of z.entries) {
+    const ext = (/\.(png|jpe?g|gif|webp|bmp)$/i.exec(e.name) || [])[1];
+    if (!e.name.startsWith("word/media/") || !ext || e.usize > 15e6 || total + e.usize > 60e6 || images.length >= 20) continue;
+    const b = await zipRead(z, e, 15e6);
+    if (!b) continue;
+    total += b.length;
+    images.push(new Blob([b], {type: ext.toLowerCase() === "jpg" ? "image/jpeg" : "image/" + ext.toLowerCase()}));
+  }
+  return {text, links, images};
+}
 async function unzipChat(buf) {  // the chat text inside a WhatsApp export .zip, read with the browser's own inflater
   const u8 = new Uint8Array(buf), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   let eocd = -1;
@@ -222,7 +292,7 @@ function hiddenLinks(links, body, limit) {  // addresses behind buttons that are
 async function pdfRead(buf) {
   const lib = await loadPdfJs();
   const doc = await lib.getDocument({data: new Uint8Array(buf), isEvalSupported: false}).promise;
-  const out = [], links = [];
+  const out = [], links = [], imagePages = [];
   for (let p = 1; p <= Math.min(doc.numPages, 10); p++) {
     const page = await doc.getPage(p);
     const items = (await page.getTextContent()).items.filter(it => it.str && it.transform)
@@ -250,9 +320,29 @@ async function pdfRead(buf) {
     try {
       for (const a of await page.getAnnotations()) { const u = a.url || a.unsafeUrl; if (u) links.push(String(u)); }
     } catch (e) {}
+    try {  // a picture big enough to hold a pasted screenshot (not a logo or bullet)
+      const ops = await page.getOperatorList(), O = lib.OPS, vp = page.getViewport({scale: 1});
+      let big = false;
+      for (let i = 0; i < ops.fnArray.length && !big; i++) {
+        if (ops.fnArray[i] === O.paintImageXObject || ops.fnArray[i] === O.paintJpegXObject || ops.fnArray[i] === O.paintInlineImageXObject) big = true;
+      }
+      if (big && vp.width * vp.height > 0) imagePages.push(p);
+    } catch (e) {}
     out.push("");
   }
-  return {text: cleanPdfText(out.join("\n")), links};
+  return {text: cleanPdfText(out.join("\n")), links, imagePages, numPages: doc.numPages};
+}
+async function pdfPagesAsImages(buf, pages, scale) {  // render pages to PNG so a scanned PDF can be read like screenshots
+  const lib = await loadPdfJs();
+  const doc = await lib.getDocument({data: new Uint8Array(buf), isEvalSupported: false}).promise, out = [];
+  for (const p of pages) {
+    if (p < 1 || p > doc.numPages) continue;
+    const page = await doc.getPage(p), vp = page.getViewport({scale: scale || 2});
+    const c = document.createElement("canvas"); c.width = Math.min(vp.width, 2400); c.height = Math.min(vp.height, 3400);
+    await page.render({canvasContext: c.getContext("2d"), viewport: vp}).promise;
+    out.push(await new Promise(res => c.toBlob(res, "image/png")));
+  }
+  return out.filter(Boolean);
 }
 async function pdfText(buf) { return (await pdfRead(buf)).text; }
 function parsePdf(read) {  // {text, links} → what the scanner needs, with the hidden button links added
@@ -278,6 +368,26 @@ function junk(ln) {
   const words = (ln.match(/[A-Za-zÀ-ɏ؀-ۿऀ-ॿ]{3,}/g) || []).length;
   if (/^\d{1,2}:\d{2}\b/.test(ln) && words < 2) return true;  // the phone's status bar
   return words < 2 && !/@|https?:\/\/|\.\w{2,}\/|\d{3}/.test(ln);
+}
+const CHART_TOKEN = /^(?:[-+]?[$€£₹¥]?\d{1,4}(?:[.,]\d{1,3})*(?:[kmb%]|k€|%)?|q[1-4]|h[12]|fy\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|mär|mai|okt|dez)[a-zä]{0,6}\.?|[|•·■□▪◆●○◼◻–—_-]+)$/i;
+function chartNoise(ln) {  // axis ticks, scales, month / quarter rows that OCR picks up from charts ("0 20 40 60", "Jan Feb Mar")
+  if (/https?:\/\/|@|www\.|\w\.\w{2,}\//.test(ln)) return false;
+  const toks = ln.split(/\s+/).filter(Boolean);
+  if (toks.length < 3) return false;
+  const hits = toks.filter(t => CHART_TOKEN.test(t.replace(/^[,;:()]+|[,;:()]+$/g, ""))).length;
+  return hits === toks.length || (toks.length >= 5 && hits >= 0.8 * toks.length);
+}
+const docWords = s => new Set((String(s || "").toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) || []));
+function addPictureText(x, texts, label) {  // add picture text that isn't already in the body
+  const have = docWords(x.body), extra = [];
+  for (const t of texts) { const w = docWords(t); let n = 0; w.forEach(v => { if (have.has(v)) n++; }); if (w.size && n < 0.8 * w.size) extra.push(t); }
+  if (!extra.length) return x;
+  const tail = `\n\n${label || "Text in pictures"}:\n` + extra.join("\n\n");
+  return {...x, body: ((x.body || "").slice(0, Math.max(0, 5000 - tail.length)) + tail).trim().slice(0, 5000), readable: true};
+}
+function novelLines(text, body) {  // lines of a whole-page reading that aren't already in the PDF's own text
+  const have = docWords(body);
+  return String(text || "").split(/\n+/).filter(ln => { const w = docWords(ln); let n = 0; w.forEach(v => { if (have.has(v)) n++; }); return w.size >= 2 && n < 0.5 * w.size && !chartNoise(ln); }).join("\n");
 }
 function joinWrapped(lines) {
   let out = "";
@@ -309,7 +419,7 @@ function parseScreen(text) {
     else if (UI_NOISE.test(ln) || /^(?:to|cc):\s/i.test(ln)) return;
     else keep.push(ln);
   });
-  const body = joinWrapped(keep.filter(x => !junk(x))).slice(0, 5000);
+  const body = joinWrapped(keep.filter(x => !junk(x) && !chartNoise(x))).slice(0, 5000);
   return {mode, sender, subject, body, app: "", app_warning: appWarning, headers: replyTo ? {reply_to: replyTo} : null,
           readable: !!body, notes: body ? "" : "No message text found in the image."};
 }
@@ -371,5 +481,5 @@ async function ocrImage(blob, uiLang) {
   const {data} = await watchdog(worker.recognize(await screenCanvas(blob)), 30000, "Reading the screenshot took too long. Try a smaller screenshot, or paste the text instead.");
   return parseScreen(data.text || "");
 }
-root.FileText = {looksLikeWhatsApp, parseWhatsApp, unzipChat, parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, pdfRead, parsePdf, cleanPdfText, hiddenLinks, parseScreen, ocrImage};
+root.FileText = {chartNoise, addPictureText, novelLines, readDocx, pdfPagesAsImages, zipEntries, zipRead, looksLikeWhatsApp, parseWhatsApp, unzipChat, parseMailPrint, parseEml, looksLikeEml, parsePlain, pdfText, pdfRead, parsePdf, cleanPdfText, hiddenLinks, parseScreen, ocrImage};
 })(typeof window !== "undefined" ? window : globalThis);

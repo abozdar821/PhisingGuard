@@ -64,8 +64,9 @@ OCR_PROMPT = (
     "the original language and script — never translate. "
     "app: the messaging or email app if recognisable. app_warning: if the app shows its own warning about the message "
     "(Gmail's \"Why is this message in spam?\" or \"Be careful with this message\", \"Suspected spam\", \"Report junk\"), "
-    "quote it briefly; otherwise empty. If the image is not a message or email, set readable to false "
-    "and say why in notes.")
+    "quote it briefly; otherwise empty. If the image also shows charts, graphs, tables of figures, logos, photos or "
+    "illustrations, leave them out: don't copy axis labels, legends, chart numbers or captions, only the message text. "
+    "If the image is not a message or email (for example only a chart or a photo), set readable to false and say why in notes.")
 
 _MAGIC = [(b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF8", "image/gif"), (b"RIFF", "image/webp")]
 
@@ -178,6 +179,22 @@ def _clean_addr(a: str) -> str:
     return a.replace("|", "l").strip(".,;:").lower()
 
 
+_CHART_TOKEN = re.compile(
+    r"(?i)^(?:[-+]?[$€£₹¥]?\d{1,4}(?:[.,]\d{1,3})*(?:[kmb%]|k€|%)?|q[1-4]|h[12]|fy\d{2,4}|"
+    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|mär|mai|okt|dez)[a-zä]{0,6}\.?|[|•·■□▪◆●○◼◻–—_-]+)$")
+
+
+def chart_noise(ln: str) -> bool:
+    """Axis ticks, scales, month or quarter rows that OCR picks up from charts and graphs ("0 20 40 60", "Jan Feb Mar")."""
+    if re.search(r"https?://|@|www\.|\w\.\w{2,}/", ln):
+        return False
+    toks = ln.split()
+    if len(toks) < 3:
+        return False
+    hits = sum(1 for t in toks if _CHART_TOKEN.match(t.strip(",;:()")))
+    return hits == len(toks) or (len(toks) >= 5 and hits >= 0.8 * len(toks))
+
+
 def _junk(ln: str) -> bool:
     """Screen furniture Tesseract turns into fragments: status bars, icons ("QO 4", "[1 O < K")."""
     words = len(re.findall(r"[A-Za-zÀ-ɏ؀-ۿऀ-ॿ]{3,}", ln))
@@ -228,7 +245,7 @@ def parse_ocr_text(text: str, screen: bool = False) -> dict:
         else:
             keep.append(ln)
     if screen:
-        keep = [x for x in keep if not _junk(x)]
+        keep = [x for x in keep if not _junk(x) and not chart_noise(x)]
     body = _join_wrapped(keep)
     out = {"mode": mode, "sender": sender, "subject": subject, "body": body, "app": "", "app_warning": app_warning,
            "headers": {"reply_to": reply_to} if reply_to else None,
@@ -534,6 +551,253 @@ def _zip_chat(data: bytes) -> tuple[str, str] | None:
         return None
 
 
+READ_DOC_PICTURES = os.environ.get("PHISHGUARD_DOC_PICTURES", "1") != "0"   # 0 = read only the text of PDFs and Word files
+MAX_DOC_IMAGES = 3            # pictures read per document (each one is a screenshot read)
+_DOC_IMAGE_MIN = 250 * 120    # smaller pictures are icons, logos and bullets
+_DOC_IMAGE_MAX = 40_000_000   # pixels: refuse decompression bombs
+
+
+def _image_size(data: bytes) -> tuple[int, int] | None:
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size
+    except Exception:
+        return None
+
+
+def _as_png(data: bytes) -> bytes | None:
+    """Any picture PIL can open → PNG bytes the screenshot reader accepts (PDFs often hold JPEG 2000, TIFF or raw images)."""
+    if _sniff(data):
+        return data
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            if im.size[0] * im.size[1] > _DOC_IMAGE_MAX:
+                return None
+            out = io.BytesIO()
+            im.convert("RGB").save(out, "PNG")
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def decode_qr(data: bytes) -> str:
+    """Text of a QR code in a picture, if OpenCV is installed (pip install opencv-python-headless); else ''."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return ""
+    try:
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+        if img is None or img.size > _DOC_IMAGE_MAX:
+            return ""
+        text, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+        return (text or "").strip()[:2000]
+    except Exception:
+        return ""
+
+
+def doc_pictures(images: list[bytes], limit: int = MAX_DOC_IMAGES) -> dict:
+    """Read the biggest pictures in a document: text in screenshots pasted into it, and QR codes.
+    Charts and logos read as no message and are left out."""
+    sized = []
+    for b in images[:60]:
+        wh = _image_size(b)
+        if wh and _DOC_IMAGE_MIN <= wh[0] * wh[1] <= _DOC_IMAGE_MAX and min(wh) >= 60:
+            sized.append((wh[0] * wh[1], b))
+    sized.sort(key=lambda x: -x[0])
+    texts, qrs, engine, errors = [], [], "", []
+    for _, b in sized[:limit]:
+        q = decode_qr(b)
+        if q and q not in qrs:
+            qrs.append(q)
+        png = _as_png(b)
+        if not png or not ocr_engines():
+            continue
+        try:
+            r = read_screenshot(png)
+        except Exception as exc:
+            errors.append(str(exc)[:120])
+            continue
+        body = "\n".join(x for x in (r.get("body") or "").splitlines() if not chart_noise(x)).strip()
+        if body and r.get("readable", True):
+            texts.append(body)
+            engine = engine or r.get("engine", "")
+    return {"texts": texts, "qrs": qrs, "engine": engine, "errors": errors, "found": len(sized)}
+
+
+def _words(s: str) -> set[str]:
+    return set(re.findall(r"\w{3,}", (s or "").lower()))
+
+
+def add_picture_text(parsed: dict, pics: dict, label: str = "Text in pictures") -> dict:
+    """Append picture text that isn't already in the body (and any QR codes) to a parsed document."""
+    body, extra = parsed.get("body") or "", []
+    for t in pics.get("texts", []):
+        w = _words(t)
+        if w and len(w & _words(body)) < 0.8 * len(w):
+            extra.append(t)
+    tail = ""
+    if extra:
+        tail += f"\n\n{label}:\n" + "\n\n".join(extra)
+    for q in pics.get("qrs", []):
+        tail += "\n\nQR code: " + q
+    if not tail:
+        return parsed
+    body = (body[:max(0, 5000 - len(tail))] + tail).strip()[:5000]
+    return {**parsed, "body": body, "readable": True}
+
+
+def _pdf_images(data: bytes, pages: int = 10) -> list[bytes]:
+    """Pictures embedded in a PDF (poppler's pdfimages, else pypdf)."""
+    import glob
+    import shutil
+    import subprocess
+    import tempfile
+    out: list[bytes] = []
+    if shutil.which("pdfimages"):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "in.pdf")
+            with open(src, "wb") as f:
+                f.write(data)
+            try:
+                subprocess.run(["pdfimages", "-l", str(pages), "-png", src, os.path.join(d, "img")], capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            for fn in sorted(glob.glob(os.path.join(d, "img-*.png")))[:60]:
+                if os.path.getsize(fn) <= 15_000_000:
+                    with open(fn, "rb") as f:
+                        out.append(f.read())
+        if out:
+            return out
+    try:
+        import io
+        from pypdf import PdfReader
+        for pg in PdfReader(io.BytesIO(data)).pages[:pages]:
+            for im in list(pg.images)[:20]:
+                if len(im.data) <= 15_000_000:
+                    out.append(im.data)
+            if len(out) >= 60:
+                break
+    except Exception:
+        pass
+    return out
+
+
+def _pdf_pages_as_images(data: bytes, pages: int = 3) -> list[bytes]:
+    """Render the first pages of a scanned PDF to PNG (poppler's pdftoppm)."""
+    import glob
+    import shutil
+    import subprocess
+    import tempfile
+    if not shutil.which("pdftoppm"):
+        return []
+    with tempfile.TemporaryDirectory() as d:
+        src = os.path.join(d, "in.pdf")
+        with open(src, "wb") as f:
+            f.write(data)
+        try:
+            subprocess.run(["pdftoppm", "-r", "150", "-png", "-l", str(pages), src, os.path.join(d, "pg")], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        out = []
+        for fn in sorted(glob.glob(os.path.join(d, "pg-*.png")))[:pages]:
+            with open(fn, "rb") as f:
+                out.append(f.read())
+        return out
+
+
+def read_scanned_pdf(data: bytes) -> dict:
+    """A PDF that is only pictures (a scan, or screenshots saved as PDF): read each page like a screenshot."""
+    if not ocr_engines():
+        raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+    imgs = _pdf_pages_as_images(data) or [b for b in (_as_png(x) for x in _pdf_images(data, 3)) if b]
+    if not imgs:
+        raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+    parts, errors = [], []
+    for png in imgs[:3]:
+        try:
+            r = read_screenshot(png)
+        except Exception as exc:
+            errors.append(str(exc)[:120])
+            continue
+        r = {**r, "body": "\n".join(x for x in (r.get("body") or "").splitlines() if not chart_noise(x)).strip()}
+        if (r.get("body") or "").strip():
+            parts.append(r)
+    if not parts:
+        raise ValueError("Couldn't find message text in this scanned PDF. Try a screenshot of it instead.")
+    out = parts[0] if len(parts) == 1 else merge_extracted(parts)
+    pics = {"qrs": [q for q in (decode_qr(x) for x in imgs[:3]) if q]}
+    out = add_picture_text(out, pics)
+    return {**out, "engine": f"{parts[0].get('engine', 'OCR')} (scanned PDF)", "app": "PDF", "fallback_errors": errors}
+
+
+_DOCX_PARA = re.compile(r"</w:p>|<w:br/>|<w:cr/>")
+_DOCX_TEXT = re.compile(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>|<w:tab/>")
+_DOCX_LINK = re.compile(r'<Relationship\s[^>]*?Target="([^"]+)"[^>]*?TargetMode="External"|'
+                        r'<Relationship\s[^>]*?TargetMode="External"[^>]*?Target="([^"]+)"')
+_ZIP_ENTRY_MAX = 25_000_000   # bytes, once unpacked
+_ZIP_TOTAL_MAX = 60_000_000
+
+
+def read_docx(data: bytes) -> dict | None:
+    """A Word document (.docx): its text, the web addresses behind its links, and the pictures pasted into it.
+    The XML is read with regular expressions, never an XML parser, so no entity tricks can run; unpacked sizes are capped."""
+    import html
+    import io
+    import zipfile
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, OSError, RuntimeError):
+        return None
+    with z:
+        infos = {i.filename: i for i in z.infolist()[:2000]}
+        main = infos.get("word/document.xml")
+        if not main:
+            return None
+        if main.file_size > _ZIP_ENTRY_MAX:
+            raise ValueError("That Word document is too large to read here.")
+        xml = z.read(main).decode("utf-8", "replace")
+        paras = []
+        for chunk in _DOCX_PARA.split(xml):
+            line = "".join(html.unescape(m.group(1)) if m.group(1) is not None else "\t" for m in _DOCX_TEXT.finditer(chunk))
+            paras.append(line.strip())
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(paras)).strip()
+        links = []
+        rels = infos.get("word/_rels/document.xml.rels")
+        if rels and rels.file_size <= 2_000_000:
+            for m in _DOCX_LINK.finditer(z.read(rels).decode("utf-8", "replace")):
+                links.append(html.unescape(m.group(1) or m.group(2)))
+        images, total = [], 0
+        for name, info in infos.items():
+            if not name.startswith("word/media/") or not name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff")):
+                continue
+            if info.file_size > 15_000_000 or total + info.file_size > _ZIP_TOTAL_MAX:
+                continue
+            total += info.file_size
+            images.append(z.read(info))
+    if text:
+        parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
+        if not parse_mail_print(text) and not parsed["sender"]:
+            parsed = {**parsed, "body": re.sub(r"[ \t]+", " ", text).strip()[:5000]}
+    else:
+        parsed = {"mode": "sms", "sender": "", "subject": "", "body": "", "headers": None}
+    extra = hidden_links(links, parsed["body"])
+    if extra:
+        tail = "\n\nLinks in this document:\n" + "\n".join(extra)
+        parsed = {**parsed, "body": parsed["body"][:5000 - len(tail)] + tail}
+    pics = doc_pictures(images)
+    parsed = add_picture_text(parsed, pics)
+    body = (parsed.get("body") or "").strip()
+    engine = "Word document" + (f" + {pics['engine']} (pictures)" if pics["texts"] else "")
+    return {**parsed, "engine": engine, "app": "Word", "readable": bool(body),
+            "notes": "" if body else "No message text found in the Word document.", "fallback_errors": pics["errors"]}
+
+
 def read_file(data: bytes, filename: str = "") -> dict:
     """Turn any supported upload into {mode, sender, subject, body, headers, ...} for the scanner."""
     name = (filename or "").lower()
@@ -550,23 +814,29 @@ def read_file(data: bytes, filename: str = "") -> dict:
         text, links = _pdf_text(data)
         text = clean_pdf_text(text)
         if len(text.strip()) < 20:
-            raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+            return read_scanned_pdf(data)   # only pictures: read the pages like screenshots
         parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
         extra = hidden_links(links, parsed["body"])
         if extra:  # the real web addresses behind "Click here" / "Update payment" buttons
             label = "Links in this email" if parsed["mode"] == "email" else "Links in this document"
             tail = f"\n\n{label}:\n" + "\n".join(extra)
             parsed = {**parsed, "body": parsed["body"][:5000 - len(tail)] + tail}
-        return {**parsed, "engine": "PDF text", "app": "PDF", "readable": bool(parsed["body"]),
-                "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": []}
+        pics = doc_pictures(_pdf_images(data)) if READ_DOC_PICTURES else {"texts": [], "qrs": [], "engine": "", "errors": []}
+        parsed = add_picture_text(parsed, pics)
+        engine = "PDF text" + (f" + {pics['engine']} (pictures)" if pics["texts"] else "")
+        return {**parsed, "engine": engine, "app": "PDF", "readable": bool(parsed["body"]),
+                "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": pics["errors"]}
     if name.endswith(".eml") or _looks_like_eml(data):
         return parse_eml(data)
     if data.startswith(b"PK\x03\x04"):
+        doc = read_docx(data)
+        if doc is not None:
+            return doc
         chat = _zip_chat(data)
         if not chat:
             raise ValueError("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.")
         return parse_whatsapp(chat[0], filename or chat[1])
-    unsupported = "That file type isn't supported. Use a screenshot, PDF, .eml email, text file, WhatsApp chat export or voicemail recording."
+    unsupported = "That file type isn't supported. Use a screenshot, PDF, Word document, .eml email, text file, WhatsApp chat export or voicemail recording."
     if name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".pdf")):
         raise ValueError("That file is damaged or isn't really a " + name.rsplit(".", 1)[1].upper() + ". " + unsupported.split(". ", 1)[1])
     try:
@@ -1115,7 +1385,8 @@ MANIFEST = {
     "share_target": {"action": "/share", "method": "POST", "enctype": "multipart/form-data",
                      "params": {"title": "title", "text": "text", "url": "url",
                                 "files": [{"name": "file", "accept": ["image/*", "application/pdf", "message/rfc822", ".eml",
-                                                                      "text/plain", ".txt", "application/zip", ".zip", "audio/*"]}]}},
+                                                                      "text/plain", ".txt", "application/zip", ".zip", "audio/*",
+                                                                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"]}]}},
 }
 SERVICE_WORKER = """const CACHE = "phishguard-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];

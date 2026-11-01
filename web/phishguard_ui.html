@@ -261,10 +261,10 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
       <div class="upload">
         <label class="btn primary upload-btn" for="file"><span aria-hidden="true">📎</span> <span data-i18n="Upload file">Upload file</span></label>
         <label class="btn upload-btn" for="qr"><span aria-hidden="true">📷</span> <span data-i18n="Scan QR code">Scan QR code</span></label>
-        <span class="note" id="drop-hint" data-i18n="Screenshots, PDF, email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.">Screenshots, PDF, email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.</span>
+        <span class="note" id="drop-hint" data-i18n="Screenshots, PDF, Word document (.docx), email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.">Screenshots, PDF, Word document (.docx), email file (.eml), text file, WhatsApp chat export or voicemail recording. Pick up to 5 files at once, e.g. several screenshots of one long email.</span>
       </div>
       <input id="qr" type="file" accept="image/*" capture="environment" hidden>
-      <input id="file" type="file" multiple accept="image/*,.pdf,application/pdf,.eml,message/rfc822,.txt,text/plain,.zip,application/zip,audio/*,.m4a,.mp3,.wav,.amr,.aac,.ogg" hidden>
+      <input id="file" type="file" multiple accept="image/*,.pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.eml,message/rfc822,.txt,text/plain,.zip,application/zip,audio/*,.m4a,.mp3,.wav,.amr,.aac,.ogg" hidden>
       <p class="note" id="ocr-note" style="margin-top:10px" hidden></p>
       <div class="or" data-i18n="or paste the message">or paste the message</div>
       <form id="text-form" autocomplete="off">
@@ -551,11 +551,12 @@ async function onQR(file) {
     await runCheck("link", "", "", text.slice(0, 5000), null);
   } finally { $("qr").value = ""; }
 }
-const KIND_ICON = {pdf: "📄", eml: "✉️", text: "📝", audio: "🎙️", chat: "💬"};
+const KIND_ICON = {pdf: "📄", docx: "📃", eml: "✉️", text: "📝", audio: "🎙️", chat: "💬"};
 function fileKind(f) {
   const n = (f.name || "").toLowerCase(), t = f.type || "";
   if (/^image\//.test(t) || /\.(png|jpe?g|gif|webp|heic)$/.test(n)) return "image";
   if (t === "application/pdf" || n.endsWith(".pdf")) return "pdf";
+  if (/wordprocessingml/.test(t) || n.endsWith(".docx")) return "docx";
   if (t === "message/rfc822" || n.endsWith(".eml")) return "eml";
   if (/^audio\//.test(t) || /\.(m4a|mp3|wav|amr|aac|ogg|opus|flac|caf|3gp)$/.test(n)) return "audio";
   if (/^text\//.test(t) || /\.(txt|text|md)$/.test(n)) return "text";
@@ -565,7 +566,7 @@ function fileKind(f) {
 async function onFile(file) {
   if (!file) return;
   const kind = fileKind(file);
-  if (kind === "unknown") { toast(t("Use a screenshot, PDF, .eml email, text file, WhatsApp chat export or voicemail recording"), true); return; }
+  if (kind === "unknown") { toast(t("Use a screenshot, PDF, Word document, .eml email, text file, WhatsApp chat export or voicemail recording"), true); return; }
   const sup = (PG.canRead && PG.canRead[kind]) || {ok: false};
   const qrText = kind === "image" ? ((await decodeQR(file)) || "").trim().slice(0, 2000) : "";
   if (!sup.ok && qrText) return onQR(file);  // can't read the text here, but the QR code can still be checked
@@ -975,7 +976,7 @@ $("signout").addEventListener("click", async () => { try { await A.logout(); } c
 
 function refreshReadiness() {
   const c = PG.canRead || {}, missing = Object.entries(c).filter(([, v]) => !v.ok);
-  const names = {image: "Screenshots", pdf: "PDFs", eml: "Email files", text: "Text files", audio: "Voicemail recordings"};
+  const names = {image: "Screenshots", pdf: "PDFs", docx: "Word documents", eml: "Email files", text: "Text files", audio: "Voicemail recordings"};
   $("ocr-note").hidden = !missing.length;
   $("ocr-note").innerHTML = missing.map(([k, v]) => `<b>${esc(t(names[k]))}:</b> ${esc(tr(v.why) || t("not available here"))}`).join("<br>");
 }

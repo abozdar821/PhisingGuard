@@ -66,7 +66,7 @@ window.PGA = {
       (remote.length ? ` (screenshots are read by ${remote.join(" or ")}, so the image is sent to that service).` : ", entirely on your server.");
     const ok = {ok: true};
     return {image: e.length ? ok : {ok: false, why: "not set up on your server yet — add ANTHROPIC_API_KEY or GEMINI_API_KEY, or install Tesseract."},
-            pdf: ok, eml: ok, text: ok, chat: ok,
+            pdf: ok, docx: ok, eml: ok, text: ok, chat: ok,
             audio: tr.length ? ok : {ok: false, why: "add GEMINI_API_KEY or install faster-whisper on your server. Until then, paste the voicemail transcript."}};
   },
   async readFile(blob, name, kind, lang, qr) {
@@ -249,7 +249,7 @@ window.PGA = {
   async canRead() {
     const ok = {ok: true};
     // Screenshots: Claude reads them inside Claude; anywhere else the on-device reader (Tesseract.js) does
-    return {image: ok, pdf: ok, eml: ok, text: ok, chat: ok,
+    return {image: ok, pdf: ok, docx: ok, eml: ok, text: ok, chat: ok,
             audio: {ok: false, why: "need your own PhishGuard server (with Gemini or offline Whisper). Here, choose Phone call and paste the voicemail transcript."}};
   },
   async readFiles(items, lang, progress) {
@@ -295,9 +295,39 @@ window.PGA = {
            readable: raw.readable !== false, notes: String(raw.notes || "").slice(0, 300),
            headers: String(raw.reply_to || "").includes("@") ? {reply_to: String(raw.reply_to).slice(0, 200)} : null};
     } else if (kind === "pdf") {
-      const read = await FileText.pdfRead(await blob.arrayBuffer());
-      if (read.text.replace(/\\s/g, "").length < 20) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
-      x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
+      const buf = await blob.arrayBuffer(), read = await FileText.pdfRead(buf.slice(0));   // pdf.js takes over the buffer it's given: pass copies
+      if (read.text.replace(/\\s/g, "").length < 20) {   // only pictures (a scan): read the first pages like screenshots
+        const pages = await FileText.pdfPagesAsImages(buf.slice(0), [1, 2, 3].slice(0, Math.min(3, read.numPages || 1)));
+        const parts = [];
+        for (const pg of pages) {
+          try { const r = (await this.readFile(pg, "page.png", "image", lang, "", {scan: false})).extracted; if ((r.body || "").trim()) parts.push(r); } catch (e) {}
+        }
+        if (!parts.length) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
+        x = {...window.PGMerge(parts), app: "PDF"}; x.engine = (parts[0].engine || "OCR") + " (scanned PDF)";
+      } else {
+        x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
+        if (read.imagePages && read.imagePages.length) {   // a screenshot pasted into the PDF: read those pages, keep only what's new
+          const texts = []; let by = "";
+          for (const pg of await FileText.pdfPagesAsImages(buf.slice(0), read.imagePages.slice(0, 2))) {
+            try { const r = (await this.readFile(pg, "page.png", "image", lang, "", {scan: false})).extracted; const t = FileText.novelLines(r.body, x.body); if (t) { texts.push(t); by = by || r.engine; } } catch (e) {}
+          }
+          if (texts.length) { x = FileText.addPictureText(x, texts); x.engine = "PDF text + " + by + " (pictures)"; }
+        }
+      }
+    } else if (kind === "docx") {
+      const d = await FileText.readDocx(await blob.arrayBuffer());
+      if (!d) throw new Error("That isn't a Word document (.docx). Save it as .docx or PDF and try again.");
+      x = {engine: "Word document", app: "Word", ...FileText.parsePdf({text: d.text, links: d.links})};
+      const sized = [];
+      for (const img of d.images) {
+        try { const bm = await createImageBitmap(img); const a = bm.width * bm.height; if (a >= 250 * 120 && Math.min(bm.width, bm.height) >= 60 && a <= 4e7) sized.push([a, img]); bm.close && bm.close(); } catch (e) {}
+      }
+      sized.sort((a, b) => b[0] - a[0]);
+      const texts = []; let by = "";
+      for (const [, img] of sized.slice(0, 3)) {
+        try { const r = (await this.readFile(img, "picture.png", "image", lang, "", {scan: false})).extracted; const t = (r.body || "").split("\\n").filter(l => !FileText.chartNoise(l)).join("\\n").trim(); if (t && r.readable !== false) { texts.push(t); by = by || r.engine; } } catch (e) {}
+      }
+      if (texts.length) { x = FileText.addPictureText(x, texts); x.engine = "Word document + " + by + " (pictures)"; }
     } else if (kind === "chat") {
       const c = await FileText.unzipChat(await blob.arrayBuffer());
       if (!c) throw new Error("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.");
