@@ -639,6 +639,19 @@ try:
     check("a decompression-bomb image is refused quickly", bomb.status_code in (422, 501) and time.time() - t0 < 5, (bomb.status_code, round(time.time() - t0, 1)))
 except ImportError:
     pass
+saved_tok = m.APP_TOKEN; m.APP_TOKEN = "long-enough-token"; m._rate.clear()
+guess = m.app.test_client(); net = {"REMOTE_ADDR": "203.0.113.50"}
+codes = [guess.post("/api/login", json={"token": f"guess{i}"}, environ_base=net).status_code for i in range(11)]
+check("sign-in guessing is capped per minute", codes[:10] == [401] * 10 and codes[10] == 429, codes)
+check("…developer sign-in shares the same cap", guess.post("/api/dev/login", json={"token": "x"}, environ_base=net,
+                                                          headers={"X-PhishGuard-Token": "long-enough-token"}).status_code == 429)
+m.APP_TOKEN = saved_tok; m._rate.clear()
+shared = [c.post("/share", data={"text": f"Pay the toll fee {i} at https://toll-fee.top/pay"}).headers["Location"] for i in range(31)]
+check("sharing to PhishGuard is rate-limited like typed checks", all("#scan=" in u for u in shared[:30]) and "Too%20many" in shared[30], shared[30])
+m._rate.clear()
+many = c.post("/share", data={"file": [(io.BytesIO(b"hello"), f"m{i}.txt") for i in range(m.MAX_FILES + 1)]}, content_type="multipart/form-data")
+check("sharing more files than the upload limit is refused", "#error=" in many.headers["Location"] and "#scan=" not in many.headers["Location"], many.headers["Location"])
+m._rate.clear()
 print(f"\n{len(fails)} failures (after security checks)", fails)
 
 # ── private .env settings file ──
