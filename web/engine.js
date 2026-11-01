@@ -234,6 +234,20 @@ function createEngine(D, env) {
       return parts.slice(-3).join(".");
     return parts.length >= 2 ? parts.slice(-2).join(".") : parts.join(".");
   }
+  // Same as _learn_key in phishguard_soc.py: on shared platforms, only the scammer's own site, bucket or page.
+  const PLATFORM_ROOTS = new Set(D.PG_PLATFORM_ROOTS), PATH_TENANT = new Set(D.PG_PATH_TENANT_HOSTS);
+  function learnKey(link) {
+    const host = (link.host || "").toLowerCase().replace(/^\.+|\.+$/g, "");
+    const plat = D.PG_FREE_HOSTS.find(h => host === h || host.endsWith("." + h)) || "";
+    if (!plat) return link.domain || "";
+    if (host !== plat) return host;
+    const url = link.url || "";
+    const rest = url.includes("://") ? url.slice(url.indexOf("://") + 3) : url;
+    let path = (rest.includes("/") ? rest.slice(rest.indexOf("/") + 1) : "").split(/[?#]/)[0].replace(/^\/+|\/+$/g, "").toLowerCase();
+    if (!path) return "";
+    if (PATH_TENANT.has(host)) path = path.split("/")[0];
+    return (host + "/" + path).slice(0, 200);
+  }
   function extractLinks(text) {
     const out = [], seen = new Set();
     const re = /\bhttps?:\/\/[^\s<>"']+|(?<![@\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})(?:\/[^\s<>"']*)?/gi;
@@ -278,8 +292,8 @@ function createEngine(D, env) {
     learnScam(scan) {
       const learned = [], s = scan.sender_norm;
       if ((s.kind === "phone" || s.kind === "email") && s.value) learned.push(["senders", s.value]);
-      new Set(scan.links.map(l => l.domain)).forEach(d => { if (d && !NEVER.has(d)) learned.push(["domains", d]); });
-      if (s.kind === "email" && s.domain && !NEVER.has(s.domain)) learned.push(["domains", s.domain]);
+      [...new Set(scan.links.map(learnKey))].sort().forEach(d => { if (d && !NEVER.has(d) && !PLATFORM_ROOTS.has(d)) learned.push(["domains", d]); });
+      if (s.kind === "email" && s.domain && !NEVER.has(s.domain) && !PLATFORM_ROOTS.has(s.domain)) learned.push(["domains", s.domain]);
       scan.phones.forEach(p => learned.push(["phones", p]));
       const out = [], dedupe = new Set();
       for (const [kind, value] of learned) {
@@ -319,6 +333,12 @@ function createEngine(D, env) {
       const saved = JSON.parse(env.load() || "null");
       if (saved) for (const k of Object.keys(store.data)) if (saved[k]) store.data[k] = saved[k];
     } catch (e) { /* corrupt or unavailable storage: start fresh */ }
+  }
+  {  // older versions learned whole platforms (googleapis.com, vercel.app…) from one scam link: forget those
+    const domains = store.data.iocs.domains || {};
+    const stale = Object.keys(domains).filter(d => PLATFORM_ROOTS.has(d));
+    stale.forEach(d => delete domains[d]);
+    if (stale.length) store.save();
   }
   const scans = [], pgCounters = { scanned: 0, flagged: 0 };
   function pgStats() {
@@ -785,8 +805,8 @@ function createEngine(D, env) {
     let hard = !!bbb;
     const learned = [];
     if (sn.value && store.lookup("senders", sn.value)) learned.push([45, `Sender ${sn.display} was previously confirmed as a scam`]);
-    const doms = new Set(links.map(l => l.domain)); if (sn.domain) doms.add(sn.domain);
-    for (const d of doms) if (store.lookup("domains", d)) { learned.push([45, `Domain ${d} was previously confirmed as a scam`]); break; }
+    const doms = new Set(links.map(learnKey)); if (sn.domain) doms.add(sn.domain);
+    for (const d of doms) if (d && store.lookup("domains", d)) { learned.push([45, `Domain ${d} was previously confirmed as a scam`]); break; }
     for (const p of phones) if (store.lookup("phones", p)) { learned.push([35, `Callback number ${p} was previously confirmed as a scam`]); break; }
     if (learned.length) { hard = true; const M = mod(); learned.forEach(([p, x]) => M.add(p, x)); take("Your training", M); }
     const { M: impM, c: impCase } = employerModule(sn, t, links);
