@@ -328,6 +328,30 @@ def _registered_domain(host: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
+# Anyone can host a page on these platforms, so one scam there says nothing about the rest of the platform:
+# "This is a scam" remembers only the scammer's own part, never the platform's domain (googleapis.com, vercel.app…).
+PG_PLATFORM_ROOTS = {_registered_domain(h) for h in PG_FREE_HOSTS}
+PG_PATH_TENANT_HOSTS = {"storage.googleapis.com", "storage.cloud.google.com", "s3.amazonaws.com"}  # bucket = 1st path part
+
+
+def _learn_key(link: dict) -> str:
+    """What a link is remembered (and matched) by: its site, or on a shared platform the scammer's site, bucket or page."""
+    host = (link.get("host") or "").lower().strip(".")
+    plat = next((h for h in PG_FREE_HOSTS if host == h or host.endswith("." + h)), "")
+    if not plat:
+        return link.get("domain") or ""
+    if host != plat:
+        return host                                   # their own sub-domain, e.g. pay-toll.vercel.app
+    url = link.get("url") or ""
+    rest = url.split("://", 1)[1] if "://" in url else url
+    path = re.split(r"[?#]", rest.split("/", 1)[1] if "/" in rest else "", maxsplit=1)[0].strip("/").lower()
+    if not path:
+        return ""
+    if host in PG_PATH_TENANT_HOSTS:
+        path = path.split("/", 1)[0]
+    return (host + "/" + path)[:200]
+
+
 def extract_links(text: str) -> list[dict]:
     links, seen = [], set()
     for m in _URL_RE.finditer(text or ""):
@@ -396,6 +420,13 @@ class TrainingStore:
                     self.data[k] = loaded[k]
         except (OSError, ValueError):
             pass
+        # older versions learned whole platforms (googleapis.com, vercel.app…) from one scam link: forget those
+        domains = self.data["iocs"].get("domains", {})
+        stale = [d for d in domains if d in PG_PLATFORM_ROOTS]
+        for d in stale:
+            del domains[d]
+        if stale:
+            self._save()
 
     def _save(self):
         self.version += 1
@@ -421,10 +452,10 @@ class TrainingStore:
             s = scan["sender_norm"]
             if s["kind"] in ("phone", "email") and s["value"]:
                 learned.append(("senders", s["value"]))
-            for d in {ln["domain"] for ln in scan["links"]}:
-                if d and d not in PG_NEVER_LEARN:
+            for d in sorted({_learn_key(ln) for ln in scan["links"]}):
+                if d and d not in PG_NEVER_LEARN and d not in PG_PLATFORM_ROOTS:
                     learned.append(("domains", d))
-            if s["kind"] == "email" and s["domain"] and s["domain"] not in PG_NEVER_LEARN:
+            if s["kind"] == "email" and s["domain"] and s["domain"] not in PG_NEVER_LEARN and s["domain"] not in PG_PLATFORM_ROOTS:
                 learned.append(("domains", s["domain"]))
             for ph in scan["phones"]:
                 learned.append(("phones", ph))
@@ -1738,7 +1769,7 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
     learned = []
     if sn["value"] and PG_STORE.lookup("senders", sn["value"]):
         learned.append((45, f"Sender {sn['display']} was previously confirmed as a scam"))
-    for d in {ln["domain"] for ln in links} | ({sn["domain"]} if sn["domain"] else set()):
+    for d in [k for k in dict.fromkeys([_learn_key(ln) for ln in links] + [sn["domain"]]) if k]:
         if PG_STORE.lookup("domains", d):
             learned.append((45, f"Domain {d} was previously confirmed as a scam"))
             break
