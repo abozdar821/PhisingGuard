@@ -24,13 +24,14 @@ Object.values(D.PG_REPORTING || {}).forEach(c => { texts.add(c.name); c.items.fo
  "Known dangerous link"].forEach(x => texts.add(x));  // live checks run only on the server, so they're listed here
 // proper names that are written the same way in that language
 const NAMES = ["FTC: ReportFraud.ftc.gov", "ReportCyber (cyber.gov.au)"];
-const SAME = {es: new Set([...NAMES, "India", "Australia", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group"]), ur: new Set(NAMES), hi: new Set(NAMES)};
+const SAME = {es: new Set([...NAMES, "India", "Australia", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group"]), ur: new Set(NAMES), hi: new Set(NAMES),
+              de: new Set([...NAMES, "Pakistan", "Hindi", "Urdu", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group", "FTC: ReportFraud.ftc.gov", "FBI Internet Crime Complaint Center (IC3)", "State Bank of Pakistan", "Canadian Anti-Fraud Centre", "Scamwatch (National Anti-Scam Centre)", "ReportCyber (cyber.gov.au)", "BISP"])};
 let bad = 0;
-for (const code of ["es", "ur", "hi"]) {
+for (const code of ["es", "ur", "hi", "de"]) {
   I.set(code);
   for (const x of texts) if (I.tr(x) === x && !SAME[code].has(x)) { bad++; console.log(`[${code}] untranslated:`, x); }
 }
 I.set("ur"); console.log("sample:", I.tr("Asks you to share a code or PIN (Spanish)"), "|", I.tr("Contains 2 link(s) — unsolicited texts rarely need one"));
 I.set("es"); console.log("sample:", I.tr("Check with Trailhead Biosystems directly: call 216-445-3835 or email info@trailbio.com. Use contact details you find yourself, not the ones in the message."));
-console.log(`${texts.size} engine strings × 3 languages · ${bad} untranslated`);
+console.log(`${texts.size} engine strings × 4 languages · ${bad} untranslated`);
 process.exit(bad ? 1 : 0);

@@ -21,9 +21,12 @@ Run
 
 Environment
   PHISHGUARD_TOKEN    access token (required when reachable from the internet)
+  PHISHGUARD_HOSTS    extra host names to accept when no token is set (IP addresses, localhost, .local, .ts.net always work)
+  PHISHGUARD_DOC_PICTURES  1 (default): read pictures inside PDFs and Word files · 0: text only
   ANTHROPIC_API_KEY   Claude: AI second opinion + screenshot reading   PHISHGUARD_MODEL  model id
   GEMINI_API_KEY      Gemini: AI second opinion + screenshot reading   GEMINI_MODEL      model id
   GEMINI_SEARCH       1 (default): Gemini checks Google Search for public scam reports · 0: off
+  GEMINI_THINKING     low (default, fast) | medium | high | off: how long Gemini thinks before answering
   GOOGLE_SAFE_BROWSING_KEY  Google's dangerous-sites list (if unset, the Gemini key is tried; it works when
                       the Safe Browsing API is enabled for that key's Google Cloud project)
   (Keys can also go in a .env file next to this app, one KEY=value per line.)
@@ -128,12 +131,15 @@ def _client_ip() -> str:
     except ValueError:
         behind_proxy = False
     if behind_proxy and request.headers.get("X-Forwarded-For"):
-        candidate = request.headers["X-Forwarded-For"].split(",")[0].strip()
-        try:
-            ipaddress.ip_address(candidate)
-            return candidate
-        except ValueError:
-            pass
+        # Proxies append the address they saw, so only the right-most entries can be trusted; the left end is
+        # whatever the visitor typed. Walk from the right past our own proxies to the first real client.
+        for candidate in reversed([x.strip() for x in request.headers["X-Forwarded-For"].split(",")]):
+            try:
+                addr = ipaddress.ip_address(candidate)
+            except ValueError:
+                return "0.0.0.0"   # garbage in the chain: trust nothing
+            if not any(addr in n for n in PROXY_NETS):
+                return candidate
     return remote
 
 

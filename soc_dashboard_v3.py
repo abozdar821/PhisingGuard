@@ -385,13 +385,16 @@ def _get_real_ip() -> str:
     except ValueError:
         trusted = False
     if trusted:
+        # Proxies append the address they saw; the left end of the chain is whatever the visitor typed.
+        # Walk from the right past our own proxies, so nobody can pose as (or frame) another address.
         xff = request.headers.get("X-Forwarded-For", "")
-        candidate = xff.split(",")[0].strip() if xff else remote
-        try:
-            ipaddress.ip_address(candidate)
-            return candidate
-        except ValueError:
-            pass
+        for candidate in reversed([x.strip() for x in xff.split(",")] if xff else []):
+            try:
+                addr = ipaddress.ip_address(candidate)
+            except ValueError:
+                return remote
+            if not any(addr in n for n in TRUSTED_PROXIES):
+                return candidate
     return remote
 
 
@@ -559,12 +562,32 @@ def _ingest() -> dict:
 def _is_admin() -> bool:
     if ADMIN_TOKEN:
         return hmac.compare_digest(request.headers.get("X-SOC-Token", ""), ADMIN_TOKEN)
-    try:
-        addr = ipaddress.ip_address(request.remote_addr or "")
+    try:  # the real client, not a local tunnel or proxy that every internet visitor would come through
+        addr = ipaddress.ip_address(_get_real_ip())
     except ValueError:
         return False
     # Not addr.is_private: in Python that also covers link-local, documentation and benchmark ranges.
     return any(addr in net for net in ADMIN_NETS)
+
+
+@app.before_request
+def _no_cross_site_writes():
+    """Admin API calls sent by another website from an admin's browser (CSRF) are refused. /log stays open on purpose."""
+    if request.method in ("GET", "HEAD", "OPTIONS") or not request.path.startswith("/api/") or request.path.startswith("/api/browser/events"):
+        return None
+    origin = request.headers.get("Origin", "")
+    if request.headers.get("Sec-Fetch-Site", "") == "cross-site" and not origin.startswith(("chrome-extension://", "moz-extension://")):
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    if origin and not origin.startswith(("chrome-extension://", "moz-extension://")) and urlparse(origin).netloc.lower() != (request.host or "").lower():
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    return None
+
+
+@app.after_request
+def _frame_guard(resp):
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return resp
 
 
 def _admin_required():

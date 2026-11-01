@@ -66,7 +66,7 @@ window.PGA = {
       (remote.length ? ` (screenshots are read by ${remote.join(" or ")}, so the image is sent to that service).` : ", entirely on your server.");
     const ok = {ok: true};
     return {image: e.length ? ok : {ok: false, why: "not set up on your server yet — add ANTHROPIC_API_KEY or GEMINI_API_KEY, or install Tesseract."},
-            pdf: ok, eml: ok, text: ok, chat: ok,
+            pdf: ok, docx: ok, eml: ok, text: ok, chat: ok,
             audio: tr.length ? ok : {ok: false, why: "add GEMINI_API_KEY or install faster-whisper on your server. Until then, paste the voicemail transcript."}};
   },
   async readFile(blob, name, kind, lang, qr) {
@@ -124,17 +124,33 @@ const FREEMAIL = new Set(PG_DATA.FREEMAIL || []);
 const GEMINI_SEARCH_NOTE = "\\nYou can use Google Search. Look up the items under <lookups> (sender domain or number, link websites, phone numbers) " +
   "for public scam or phishing reports, e.g. FTC, BBB Scam Tracker, news, forums and scam-report sites, and say briefly in the reasoning what you " +
   "found (or that you found nothing). Never search for the recipient's own name, email address or other personal details from the message.";
+// Newer Flash models think at a "medium" level by default; that thinking counts against maxOutputTokens and made
+// answers slow or cut off (then PhishGuard asked twice). Low thinking is plenty for a scam verdict. A model that
+// rejects thinkingLevel is asked again without it, and this browser remembers that.
+const KNT = "phishguard.gemini.nothink";
 async function gemCall(parts, opts) {
+  opts = opts || {};
   const key = gemKey();
   if (!key) throw new Error("Add your Gemini API key first (History → Gemini backup assistant).");
-  const body = {contents: [{role: "user", parts}], generationConfig: {temperature: 0, maxOutputTokens: 2048}};
-  if (opts && opts.search) body.tools = [{google_search: {}}]; else body.generationConfig.responseMimeType = "application/json";
-  let r;
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-                    {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"}, body: JSON.stringify(body)});
-  } catch (e) { throw new Error("Couldn't reach Gemini from this page. Open PhishGuard in a normal browser tab, such as your own website, to use Gemini."); }
-  const data = await r.json().catch(() => ({}));
+  const cfg = {temperature: 0, maxOutputTokens: 4096};
+  if (!ls.get(KNT)) cfg.thinkingConfig = {thinkingLevel: "low"};
+  const body = {contents: [{role: "user", parts}], generationConfig: cfg};
+  if (opts.search) body.tools = [{google_search: {}}]; else cfg.responseMimeType = "application/json";
+  const post = async () => {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), opts.timeout || 25000);
+    try {
+      return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+                         {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"}, body: JSON.stringify(body), signal: ctl.signal});
+    } catch (e) {
+      if (e && e.name === "AbortError") throw new Error("Gemini took too long to answer. Please try again.");
+      throw new Error("Couldn't reach Gemini from this page. Open PhishGuard in a normal browser tab, such as your own website, to use Gemini.");
+    } finally { clearTimeout(timer); }
+  };
+  let r = await post(), data = await r.json().catch(() => ({}));
+  if (r.status === 400 && cfg.thinkingConfig && /thinking/i.test((data.error && data.error.message) || "")) {
+    ls.set(KNT, "1"); delete cfg.thinkingConfig;
+    r = await post(); data = await r.json().catch(() => ({}));
+  }
   if (!r.ok) throw new Error("Gemini: " + ((data.error && data.error.message) || "HTTP " + r.status));
   const c = (data.candidates || [])[0];
   if (!c) throw new Error("Gemini didn't answer" + (data.promptFeedback && data.promptFeedback.blockReason ? " (blocked by its safety filter)." : "."));
@@ -158,9 +174,9 @@ function lookups(scan) {
 async function askGemini(scan) {
   const look = lookups(scan), prompt = E.aiPrompt(scan) + (look ? `\\n<lookups>${look}</lookups>` : "");
   let out;
-  try { out = await gemCall([{text: prompt + GEMINI_SEARCH_NOTE}], {search: true}); }
+  try { out = await gemCall([{text: prompt + GEMINI_SEARCH_NOTE}], {search: true, timeout: 20000}); }
   catch (e) { if (/reach Gemini|API key|permission|denied/i.test(e.message)) throw e; out = null; }
-  if (!out || !/\\{/.test(out.text)) out = {...(await gemCall([{text: prompt}], {})), sources: [], searched: []};
+  if (!out || !/\\{/.test(out.text)) out = {...(await gemCall([{text: prompt}], {timeout: 15000})), sources: [], searched: []};
   return {...parseJson(out.text), sources: out.sources, searched: out.searched};
 }
 const b64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] || ""); fr.onerror = () => rej(new Error("Couldn't read that file.")); fr.readAsDataURL(blob); });
@@ -175,7 +191,7 @@ function fromReader(raw, engine) {
 }
 async function geminiReads(blob) {
   if (blob.size > 15 * 1024 * 1024) throw new Error("That image is too large. Try a smaller screenshot.");
-  const out = await gemCall([{text: OCR_PROMPT}, {inline_data: {mime_type: blob.type || "image/png", data: await b64(blob)}}], {});
+  const out = await gemCall([{text: OCR_PROMPT}, {inline_data: {mime_type: blob.type || "image/png", data: await b64(blob)}}], {timeout: 45000});
   return fromReader(parseJson(out.text), "Gemini");
 }
 async function safeBrowsing(urls) {  // {url: kind}, or null when this key can't use Safe Browsing
@@ -233,7 +249,7 @@ window.PGA = {
   async canRead() {
     const ok = {ok: true};
     // Screenshots: Claude reads them inside Claude; anywhere else the on-device reader (Tesseract.js) does
-    return {image: ok, pdf: ok, eml: ok, text: ok, chat: ok,
+    return {image: ok, pdf: ok, docx: ok, eml: ok, text: ok, chat: ok,
             audio: {ok: false, why: "need your own PhishGuard server (with Gemini or offline Whisper). Here, choose Phone call and paste the voicemail transcript."}};
   },
   async readFiles(items, lang, progress) {
@@ -279,9 +295,39 @@ window.PGA = {
            readable: raw.readable !== false, notes: String(raw.notes || "").slice(0, 300),
            headers: String(raw.reply_to || "").includes("@") ? {reply_to: String(raw.reply_to).slice(0, 200)} : null};
     } else if (kind === "pdf") {
-      const read = await FileText.pdfRead(await blob.arrayBuffer());
-      if (read.text.replace(/\\s/g, "").length < 20) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
-      x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
+      const buf = await blob.arrayBuffer(), read = await FileText.pdfRead(buf.slice(0));   // pdf.js takes over the buffer it's given: pass copies
+      if (read.text.replace(/\\s/g, "").length < 20) {   // only pictures (a scan): read the first pages like screenshots
+        const pages = await FileText.pdfPagesAsImages(buf.slice(0), [1, 2, 3].slice(0, Math.min(3, read.numPages || 1)));
+        const parts = [];
+        for (const pg of pages) {
+          try { const r = (await this.readFile(pg, "page.png", "image", lang, "", {scan: false})).extracted; if ((r.body || "").trim()) parts.push(r); } catch (e) {}
+        }
+        if (!parts.length) throw new Error("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.");
+        x = {...window.PGMerge(parts), app: "PDF"}; x.engine = (parts[0].engine || "OCR") + " (scanned PDF)";
+      } else {
+        x = {engine: "PDF text", app: "PDF", ...FileText.parsePdf(read)};
+        if (read.imagePages && read.imagePages.length) {   // a screenshot pasted into the PDF: read those pages, keep only what's new
+          const texts = []; let by = "";
+          for (const pg of await FileText.pdfPagesAsImages(buf.slice(0), read.imagePages.slice(0, 2))) {
+            try { const r = (await this.readFile(pg, "page.png", "image", lang, "", {scan: false})).extracted; const t = FileText.novelLines(r.body, x.body); if (t) { texts.push(t); by = by || r.engine; } } catch (e) {}
+          }
+          if (texts.length) { x = FileText.addPictureText(x, texts); x.engine = "PDF text + " + by + " (pictures)"; }
+        }
+      }
+    } else if (kind === "docx") {
+      const d = await FileText.readDocx(await blob.arrayBuffer());
+      if (!d) throw new Error("That isn't a Word document (.docx). Save it as .docx or PDF and try again.");
+      x = {engine: "Word document", app: "Word", ...FileText.parsePdf({text: d.text, links: d.links})};
+      const sized = [];
+      for (const img of d.images) {
+        try { const bm = await createImageBitmap(img); const a = bm.width * bm.height; if (a >= 250 * 120 && Math.min(bm.width, bm.height) >= 60 && a <= 4e7) sized.push([a, img]); bm.close && bm.close(); } catch (e) {}
+      }
+      sized.sort((a, b) => b[0] - a[0]);
+      const texts = []; let by = "";
+      for (const [, img] of sized.slice(0, 3)) {
+        try { const r = (await this.readFile(img, "picture.png", "image", lang, "", {scan: false})).extracted; const t = (r.body || "").split("\\n").filter(l => !FileText.chartNoise(l)).join("\\n").trim(); if (t && r.readable !== false) { texts.push(t); by = by || r.engine; } } catch (e) {}
+      }
+      if (texts.length) { x = FileText.addPictureText(x, texts); x.engine = "Word document + " + by + " (pictures)"; }
     } else if (kind === "chat") {
       const c = await FileText.unzipChat(await blob.arrayBuffer());
       if (!c) throw new Error("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.");

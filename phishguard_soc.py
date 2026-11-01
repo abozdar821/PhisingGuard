@@ -28,6 +28,7 @@ Env
   SOC_ADMIN_TOKEN      require X-SOC-Token header for admin actions (block, feedback, demo)
   ANTHROPIC_API_KEY    enable Claude opinion      PHISHGUARD_MODEL   Claude model id
   GEMINI_API_KEY       enable Gemini opinion      GEMINI_MODEL       Gemini model id
+  GEMINI_THINKING      low (default) | medium | high | off: how long Gemini thinks before answering
   PHISHGUARD_DATA      path of the training store   SOC_HOST / SOC_PORT   bind address
 """
 
@@ -395,13 +396,16 @@ def _get_real_ip() -> str:
     except ValueError:
         trusted = False
     if trusted:
+        # Proxies append the address they saw; the left end of the chain is whatever the visitor typed.
+        # Walk from the right past our own proxies, so nobody can pose as (or frame) another address.
         xff = request.headers.get("X-Forwarded-For", "")
-        candidate = xff.split(",")[0].strip() if xff else remote
-        try:
-            ipaddress.ip_address(candidate)
-            return candidate
-        except ValueError:
-            pass
+        for candidate in reversed([x.strip() for x in xff.split(",")] if xff else []):
+            try:
+                addr = ipaddress.ip_address(candidate)
+            except ValueError:
+                return remote
+            if not any(addr in n for n in TRUSTED_PROXIES):
+                return candidate
     return remote
 
 
@@ -576,12 +580,32 @@ def _ingest() -> dict:
 def _is_admin() -> bool:
     if ADMIN_TOKEN:
         return hmac.compare_digest(request.headers.get("X-SOC-Token", ""), ADMIN_TOKEN)
-    try:
-        addr = ipaddress.ip_address(request.remote_addr or "")
+    try:  # the real client, not a local tunnel or proxy that every internet visitor would come through
+        addr = ipaddress.ip_address(_get_real_ip())
     except ValueError:
         return False
     # Not addr.is_private: in Python that also covers link-local, documentation and benchmark ranges.
     return any(addr in net for net in ADMIN_NETS)
+
+
+@app.before_request
+def _no_cross_site_writes():
+    """Admin API calls sent by another website from an admin's browser (CSRF) are refused. /log stays open on purpose."""
+    if request.method in ("GET", "HEAD", "OPTIONS") or not request.path.startswith("/api/") or request.path.startswith("/api/browser/events"):
+        return None
+    origin = request.headers.get("Origin", "")
+    if request.headers.get("Sec-Fetch-Site", "") == "cross-site" and not origin.startswith(("chrome-extension://", "moz-extension://")):
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    if origin and not origin.startswith(("chrome-extension://", "moz-extension://")) and urlparse(origin).netloc.lower() != (request.host or "").lower():
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    return None
+
+
+@app.after_request
+def _frame_guard(resp):
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return resp
 
 
 def _admin_required():
@@ -834,6 +858,7 @@ def random_label(host: str) -> str:
 
 PG_LOOKALIKES = ["paypa1", "g00gle", "arnazon", "amaz0n", "micros0ft", "rnicrosoft", "app1e",
                  "faceb00k", "netf1ix", "chasebank-secure", "bankofamerica-secure"]
+PG_GOOGLE_SHARE = {"photos.app.goo.gl", "maps.app.goo.gl"}  # Google's own share links, not a general shortener
 PG_SHORTENERS = {"bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "rb.gy", "cutt.ly",
                  "shorturl.at", "tiny.cc", "buff.ly", "rebrand.ly", "t.ly", "s.id", "v.gd", "qrco.de", "short.gy", "shorturl.gg"}
 # Free website builders and hosting often used for throw-away fake sites (matched on the host, so subdomains count).
@@ -1186,7 +1211,7 @@ def _debt_module(body_l: str, body: str, links: list[dict]):
 
 
 # Calling codes for the countries PhishGuard knows (the app works out the user's country on the device).
-PG_COUNTRY_CODES = {"US": "1", "CA": "1", "PK": "92", "IN": "91", "GB": "44", "AU": "61"}
+PG_COUNTRY_CODES = {"US": "1", "CA": "1", "PK": "92", "IN": "91", "GB": "44", "AU": "61", "DE": "49"}
 
 
 def _sender_module(sn: dict, mode: str, styled_name: bool = False, home_cc: str = ""):
@@ -1202,6 +1227,8 @@ def _sender_module(sn: dict, mode: str, styled_name: bool = False, home_cc: str 
         elif len(v) not in (4, 5, 6, 10):
             if len(v) == 11 and v.startswith("03"):
                 pass  # a Pakistani mobile number written the local way (03xx)
+            elif 11 <= len(v) <= 12 and v[:3] in ("015", "016", "017"):
+                pass  # a German mobile number written the local way (015x/016x/017x)
             elif 11 <= len(v) <= 13 and sn["display"].strip().startswith(("+", "00")):
                 if not (home_cc and v.startswith(home_cc)):  # a number from your own country is normal
                     add(10, "Sent from an international number")
@@ -1408,18 +1435,22 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
 # ══════════════════════════════════════════════════════════════════════════════
 LANG_NAMES = {"en": "English", "es": "Spanish", "fr": "French", "pt": "Portuguese", "ur": "Urdu", "hi": "Hindi",
               "ar": "Arabic", "fa": "Persian", "bn": "Bengali", "pa": "Punjabi", "ru": "Russian", "zh": "Chinese",
-              "ja": "Japanese", "ko": "Korean", "th": "Thai", "ur-Latn": "Roman Urdu / Hindi"}
+              "ja": "Japanese", "ko": "Korean", "th": "Thai", "ur-Latn": "Roman Urdu / Hindi", "de": "German"}
 SCRIPT_RANGES = [("hi", 0x0900, 0x097F), ("bn", 0x0980, 0x09FF), ("pa", 0x0A00, 0x0A7F), ("ar", 0x0600, 0x06FF),
                  ("ar", 0x0750, 0x077F), ("ar", 0xFB50, 0xFDFF), ("ar", 0xFE70, 0xFEFF), ("ru", 0x0400, 0x04FF),
                  ("zh", 0x4E00, 0x9FFF), ("ja", 0x3040, 0x30FF), ("ko", 0xAC00, 0xD7AF), ("th", 0x0E00, 0x0E7F)]
 URDU_ONLY = "ٹڈڑںےۓہھ"
 PERSIAN_HINT = "پچژگ"
-LATIN_LETTERS = "a-záéíóúñüçàèâêîôûãõœ"
+LATIN_LETTERS = "a-záéíóúñüçàèâêîôûãõœäöß"
 STOPWORDS = {
     "en": "the and you your is are to of for this that with have will please we our has be on it in".split(),
     "es": "el la los las de que y su sus por para con es una un usted tu se del al ha hemos está cuenta gracias favor".split(),
     "fr": "le la les de des et vous votre est pour avec une un nous sur dans au aux compte merci".split(),
     "pt": "o a os as de que e seu sua para com é uma um você não no na conta obrigado".split(),
+    "de": ("der die das und ist nicht sie ihr ihre ihren ihrem ihnen sind wir uns mit für auf den dem des ein eine einen "
+           "einem zu von bitte haben wird werden wurde konto vielen dank ich du dich dir mein meine hallo kannst können "
+           "mir mich mal noch auch nur aber wenn dass oder hier jetzt heute bei nach über schnell gerade bekommen schon "
+           "nochmal danke liebe lieber grüße gruß ihres ihrer sehr geehrte geehrter").split(),
     "ur-Latn": ("aap ap apka aapka apki aapki apko aapko hai hain ho ka ki ke ko mein main nahi nahin kya karein karen "
                 "kar kare jaye jayega jaega raha rahi abhi foran hum humein hamein apna apni apne wala wali liye sath se "
                 "bhi ye yeh woh aur").split(),
@@ -1439,7 +1470,7 @@ def detect_language(text: str) -> dict:
     latin = 0
     for ch in text or "":
         o = ord(ch)
-        if ("a" <= ch.lower() <= "z") or ch.lower() in "áéíóúñüçàèâêîôûãõœ":
+        if ("a" <= ch.lower() <= "z") or ch.lower() in LATIN_LETTERS[3:]:
             latin += 1
             continue
         for code, lo, hi in SCRIPT_RANGES:
@@ -1588,6 +1619,75 @@ MULTI_LEXICON = {
             f"{_LB}(?:ammi|ami|abbu|abu|beta|beti|bhai|main hoon|mai hu){_LE}",
             f"{_LB}(?:accident|hadsa|hospital|giraftar|thane){_LE}", f"{_LB}(?:paise|paisay|raqam|bhej){_LE}"]},
     ],
+    "de": [
+        {"kind": "delivery", "points": 30, "text": "Asks for a parcel, customs or delivery fee", "all": [
+            f"{_LB}(?:paket|päckchen|sendung|zustellung|lieferung|dhl|hermes|dpd|gls|ups|zoll)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:gebühr|gebuehr|zollgebühr|nachgebühr|porto|versandkosten|bezahlen|zahlen|nachzahlung|begleichen)[{LATIN_LETTERS}]*"]},
+        {"kind": "alert", "points": 20, "text": "Unusual-activity alert used to rush you", "all": [
+            f"{_LB}(?:ungewöhnliche aktivität|verdächtige aktivität|unbefugter zugriff|unbefugten zugriff|ungewöhnliche anmeldung|verdächtige anmeldung|sicherheitswarnung){_LE}"]},
+        {"kind": "code", "neg": True, "points": 40, "text": "Asks you to share a code or PIN", "all": [
+            f"(?:{_LB}(?:code|tan|pushtan|push-tan|phototan|pin|passwort|bestätigungscode|sicherheitscode|zahlencode){_LE}[^.!?\\n]{{0,70}}{_LB}(?:mitteilen|schicken|schick|senden|sende|weiterleiten|weiterleitest|nennen|geben|gib|sagen|sag|durchgeben|eingeben)[{LATIN_LETTERS}]*"
+            f"|{_LB}(?:schick|schicken|sende|senden|gib|geben|sag|sagen|nenne|nennen|teile|teilen)[{LATIN_LETTERS}]*(?:\\s+sie)?\\s+(?:mir|uns)[^.!?\\n]{{0,40}}{_LB}(?:code|tan|pin|passwort|zahlencode){_LE})"]},
+        {"kind": "code", "neg": True, "points": 30, "text": "Says a code was sent to you by mistake and asks for it, a WhatsApp account-takeover trick", "all": [
+            f"{_LB}(?:versehentlich|aus versehen|falsch geschickt|falsche nummer|dir einen code|dir den code|an deine nummer){_LE}", f"{_LB}(?:code|zahlencode|sms){_LE}"]},
+        {"kind": "blocked", "points": 20, "text": "Says your account, card or service is blocked", "all": [
+            f"{_LB}(?:konto|karte|zugang|account|online-banking|onlinebanking|kreditkarte|girokarte|mitgliedschaft|abo){_LE}",
+            f"{_LB}(?:gesperrt|sperrung|eingeschränkt|deaktiviert|gekündigt|blockiert|eingefroren|pausiert)[{LATIN_LETTERS}]*"]},
+        {"kind": "blocked", "points": 30, "text": "Bank \"security update\" that asks you to confirm your TAN or banking app", "all": [
+            f"{_LB}(?:sparkasse|volksbank|raiffeisenbank|vr bank|vr-bank|commerzbank|deutsche bank|postbank|ing|dkb|comdirect|n26|targobank|hypovereinsbank|online-banking|onlinebanking)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:pushtan|push-tan|phototan|tan-verfahren|tan-app|sicherheitsverfahren|legitimation|neu registrieren|erneut registrieren|reaktivier|aktualisierung|datenabgleich|verifizierung)[{LATIN_LETTERS}]*"]},
+        {"kind": "prize", "points": 30, "text": "Announces a prize or winnings you didn't enter for", "all": [
+            f"{_LB}(?:gewonnen|gewinner|gewinnerin|gewinnspiel|glückwunsch|glückwünsche|lotterie|verlosung|hauptgewinn|ausgewählt){_LE}"]},
+        {"kind": "aid", "points": 25, "text": "Offers a government benefit or subsidy", "all": [
+            f"{_LB}(?:steuerrückerstattung|rückerstattung|erstattung|energiepauschale|entlastungsbetrag|bürgergeld|kindergeld|förderung){_LE}"]},
+        {"kind": "aid", "points": 20, "text": "Claims to come from a German authority and asks for money or your details", "all": [
+            f"{_LB}(?:finanzamt|bundeszentralamt für steuern|bzst|elster|zollamt|hauptzollamt|bundespolizei|bundeskriminalamt|bka|europol|interpol){_LE}",
+            f"{_LB}(?:erstattung|rückerstattung|steuerrückerstattung|gebühr|strafe|bußgeld|formular|bestätigen|daten|zahlen|zahlung)[{LATIN_LETTERS}]*"]},
+        {"kind": "urgency", "points": 10, "text": "Pressure to act immediately", "all": [
+            f"{_LB}(?:dringend|sofort|umgehend|unverzüglich|letzte mahnung|letzte warnung|innerhalb von \\d+ (?:stunden|tagen)|heute noch|bis spätestens|nur noch mit|ab dem \\d{{1,2}}\\.\\d{{1,2}}\\.){_LE}"]},
+        {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": [
+            f"{_LB}(?:bezahlen|zahlen|überweisung|überweisen|überweis|gebühr|gutschein|gutscheinkarte|paysafecard|bitcoin|echtzeitüberweisung|vorkasse|per paypal|einzahlen|kartendaten|kontodaten)[{LATIN_LETTERS}]*"]},
+        {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": [
+            f"{_LB}(?:bestätigen sie|verifizieren|verifizierung|daten aktualisieren|aktualisieren sie|klicken sie|klick auf|hier klicken|auf den link|über den link|link öffnen|legitimieren|formular aus|füllen sie das formular|formular ausfüllen|zahlungsdaten|führen sie|jetzt durchführen|jetzt aktualisieren|jetzt bestätigen|jetzt aktivieren){_LE}"]},
+        {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": [
+            f"{_LB}(?:festnahme|haftbefehl|polizei|kriminalpolizei|staatsanwalt|strafanzeige|strafverfahren|gericht|inkasso|pfändung|vollstreckung|mahnverfahren|mahnbescheid)[{LATIN_LETTERS}]*"]},
+        {"kind": "newnumber", "points": 20, "text": "Says they have a new number or lost their phone", "all": [
+            f"{_LB}(?:neue nummer|neuen nummer|neue handynummer|meine neue nummer|neues handy|handy kaputt|handy ist kaputt|handy verloren|handy ins wasser|handy ist ins wasser|altes handy){_LE}"]},
+        {"kind": "secret", "points": 15, "text": "Asks you to keep it secret", "all": [
+            f"{_LB}(?:sag niemandem|sag es niemandem|nicht weitersagen|bleibt unter uns|erzähl es niemandem|erzähl niemandem|niemandem etwas|sag mama|sag papa|nichts sagen){_LE}"]},
+        {"kind": "family", "points": 35, "text": "Family-emergency story that ends with a money request", "all": [
+            f"{_LB}(?:mama|mami|mutti|papa|papi|vati|oma|opa|ich bin's|ich bins|ich bin es){_LE}",
+            f"{_LB}(?:neue nummer|neuen nummer|neues handy|handy kaputt|handy verloren|handy ist ins wasser|unfall|krankenhaus|polizei|kaution|notfall|neues konto|gehackt){_LE}",
+            f"{_LB}(?:überweis|geld|rechnung|bezahlen|zahlen|kaution|kontodaten|€|euro)[{LATIN_LETTERS}]*"]},
+        {"kind": "family", "points": 35, "text": "Someone you know says their account was hacked or replaced, then asks for money or a code", "all": [
+            f"{_LB}(?:neues konto|neuen account|neuer account|neues profil|altes konto|wurde gehackt|account wurde gehackt|konto wurde gehackt|gehackt){_LE}",
+            f"{_LB}(?:überweis|geld|paypal|€|euro|schicken|code|weiterleiten)[{LATIN_LETTERS}]*"]},
+        {"kind": "family", "points": 40, "text": "Shock call: says a relative caused an accident and needs bail or money", "all": [
+            f"{_LB}(?:unfall|tödlichen unfall|schweren unfall|verunglückt){_LE}", f"{_LB}(?:kaution|untersuchungshaft|freikaufen|geld|bargeld|schmuck){_LE}"]},
+        {"kind": "threat", "points": 40, "text": "Fake police officer asks to collect your cash or valuables for safekeeping", "all": [
+            f"{_LB}(?:polizei|kriminalpolizei|kommissar|polizist|beamter|staatsanwalt)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:bargeld|schmuck|wertsachen|ersparnisse|geld)[{LATIN_LETTERS}]*", f"{_LB}(?:abholen|abzuholen|sicher verwahren|in sicherheit|vorbeikommen|kommt vorbei|kommt gleich)[{LATIN_LETTERS}]*"]},
+        {"kind": "task", "points": 40, "text": "Work-from-home job with easy daily earnings (task scam)", "all": [
+            f"{_LB}(?:nebenjob|heimarbeit|von zu hause|von zuhause|homeoffice|home-office|teilzeit|nebenverdienst|minijob|mitarbeiter für|online-bewertungen|bewertungen schreiben|produkte liken|produkttester|recruiterin|recruiter)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:täglich|pro tag|am tag|verdienen|verdienst|euro am tag|€ am tag|stundenlohn|bis zu)[{LATIN_LETTERS}]*"]},
+        {"kind": "task", "points": 15, "text": "Moves you to Telegram to continue, away from the app's protections", "all": [
+            f"{_LB}(?:telegram){_LE}", f"{_LB}(?:kontakt|kontaktieren|schreiben|schreib|beitreten|melden|hinzufügen|gruppe|kanal|chatten)[{LATIN_LETTERS}]*"]},
+        {"kind": "payment", "points": 35, "text": "Marketplace \"payment received\" link: real buyers never send a link to collect your money", "all": [
+            f"{_LB}(?:kleinanzeigen|ebay|vinted|willhaben|sicher bezahlen|käuferschutz|ihren artikel|ihre anzeige|möchte ihre|kaufe ihre|kaufe ihren)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:zahlung erhalten|zahlung (?:zu )?bestätigen|geld (?:zu )?erhalten|betrag (?:zu )?erhalten|kaufbetrag|zahlung freigeben|auszahlung|bereits bezahlt|schon bezahlt)[{LATIN_LETTERS}]*"]},
+        {"kind": "payment", "points": 45, "text": "Brand-ambassador offer where you pay for the \"free\" product or its shipping", "all": [
+            f"{_LB}(?:markenbotschafter|markenbotschafterin|botschafter|ambassador|influencer-kooperation|kooperation){_LE}",
+            f"{_LB}(?:versandkosten|zahlst|bezahlst|rabattcode|gutscheincode|nur den versand)[{LATIN_LETTERS}]*"]},
+        {"kind": "invest", "points": 45, "text": "Promises guaranteed or very high returns on crypto or trading", "all": [
+            f"{_LB}(?:krypto|kryptowährung|bitcoin|trading|trading-bot|investition|investieren|investment|anlage|aktien|plattform)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:garantiert|garantierte|rendite|gewinn verdoppeln|verdoppeln|risikofrei|ohne risiko|passives einkommen|% gewinn)[{LATIN_LETTERS}]*"]},
+        {"kind": "alert", "points": 25, "text": "Fake tech-support warning that your device is infected", "all": [
+            f"{_LB}(?:microsoft|windows|apple|virus|trojaner|gehackt|infiziert){_LE}",
+            f"{_LB}(?:anrufen|rufen sie|hotline|support|techniker|fernwartung|teamviewer|anydesk)[{LATIN_LETTERS}]*"]},
+        {"kind": "utility", "points": 30, "text": "Threatens to cut off your power, water or service", "all": [
+            f"{_LB}(?:strom|gas|wasser|stadtwerke|stromanbieter|internetanschluss){_LE}",
+            f"{_LB}(?:abgestellt|abstellen|abschalten|abgeschaltet|sperre|sperrung|unterbrochen|gekündigt)[{LATIN_LETTERS}]*"]},
+    ],
     "ar": [
         {"kind": "utility", "points": 30, "text": "Threatens to cut off your power, water or service", "all": ["(?:الكهرباء|المياه|الغاز)", "(?:قطع|فصل|إيقاف|ايقاف)"]},
         {"kind": "delivery", "points": 30, "text": "Asks for a parcel, customs or delivery fee", "all": ["(?:شحنة|طرد|التوصيل|الجمارك)", "(?:رسوم|ادفع|دفع)"]},
@@ -1644,6 +1744,8 @@ MULTI_NEG = {
     "fr": [f"{_LB}ne\\s+(?:le\\s+|la\\s+|les\\s+)?(?:communiquez|partagez|donnez|transmettez|divulguez)[{LATIN_LETTERS}]*", f"{_LB}jamais\\s+(?:votre|ce|le)\\s+code"],
     "pt": [f"{_LB}(?:não|nao|nunca)\\s+(?:o\\s+|a\\s+)?(?:compartilhe|informe|passe|envie|forneça|forneca|divulgue)[{LATIN_LETTERS}]*"],
     "ar": ["(?:لا|لاتقم ب)\\s*(?:تشارك|تعطي|ترسل|تخبر|تفصح)[^\\s]*"],
+    "de": [f"{_LB}(?:niemals|nie|keinesfalls|auf keinen fall)[^.!?\\n]{{0,50}}",
+           f"{_LB}(?:geben|teilen|nennen|schicken|senden|leiten)\\s+sie[^.!?\\n]{{0,40}}{_LB}(?:niemals|nie|nicht)[^.!?\\n]{{0,20}}"],
 }
 LEXICON_LANGS = ["en"] + list(MULTI_LEXICON)
 _MULTI_NEG_RX = {lang: [re.compile(normalize_text(p)) for p in pats] for lang, pats in MULTI_NEG.items()}
@@ -1773,7 +1875,7 @@ def _link_module(links: list[dict], mode: str, body_l: str, sender_dom: str = ""
         host, dom, url = ln["host"], ln["domain"], ln["url"]
         url_l = url.lower()
         tld = host.rsplit(".", 1)[-1]
-        if dom in PG_SHORTENERS: add(30 if mode == "link" else 25, f"Shortened link hides the destination: {host}")
+        if dom in PG_SHORTENERS and host not in PG_GOOGLE_SHARE: add(30 if mode == "link" else 25, f"Shortened link hides the destination: {host}")
         try:
             ipaddress.ip_address(host)
             add(30, f"Link points to a raw IP address: {host}")
@@ -1885,7 +1987,7 @@ PG_ACTIONS["Spoofed email (failed authentication)"] = [
     "Don't click links, open attachments or reply — the sender's address is forged.",
     "Go to the real company's site or app by typing the address yourself.",
     "Use your mail app's \"Report phishing\" button so the provider learns from it."]
-UI_LANGS = {"en": "English", "es": "Spanish", "ur": "Urdu", "hi": "Hindi"}
+UI_LANGS = {"en": "English", "es": "Spanish", "ur": "Urdu", "hi": "Hindi", "de": "German"}
 PG_ACTIONS["Suspicious link"] = [
     "Don't open the link, and never enter passwords, card numbers or codes on a page you reached from a message or QR code.",
     "To reach the company, type its address yourself or use its official app.",
@@ -1980,6 +2082,15 @@ PG_REPORTING = {
          "what": "Report scams so they can be disrupted and others warned"},
         {"name": "ReportCyber (cyber.gov.au)", "url": "https://www.cyber.gov.au/", "topics": ["online", "bank"],
          "what": "Report cybercrime to police, especially if you lost money"}]},
+    "DE": {"name": "Germany", "items": [
+        {"name": "Police Onlinewache (online report)", "url": "https://portal.onlinewache.polizei.de/de/", "phone": "110",
+         "topics": ["all"], "what": "Report fraud to your state's police online; call 110 only in an emergency"},
+        {"name": "Verbraucherzentrale Phishing-Radar", "url": "mailto:phishing@verbraucherzentrale.nrw", "email": "phishing@verbraucherzentrale.nrw",
+         "topics": ["email", "online", "phishing"], "what": "Forward phishing emails so others can be warned"},
+        {"name": "Bundesnetzagentur: problems with phone numbers", "url": "https://www.bundesnetzagentur.de/aergermitrufnummern",
+         "topics": ["sms", "call"], "what": "Report scam calls, SMS and messenger spam"},
+        {"name": "Card and online-banking block line 116 116", "url": "", "phone": "116 116", "topics": ["bank"],
+         "what": "Block your card or online banking right away, then call your bank"}]},
     "OTHER": {"name": "Other countries", "items": [
         {"name": "Your local police or national cybercrime unit", "url": "", "topics": ["all"],
          "what": "Report it, especially if you lost money or shared personal details"},
@@ -2060,20 +2171,45 @@ _GEMINI_SEARCH_NOTE = (
     "personal details from the message.")
 
 
+# Newer Flash models "think" at a medium level by default. That thinking counts against maxOutputTokens and made
+# opinions slow, or cut off before the answer (then PhishGuard asked a second time). A short, low-thinking answer is
+# plenty for a scam verdict. "low" works on every current Flash and Flash-Lite model; a model that rejects
+# thinkingLevel (older 2.5 models) is asked again without it, and remembered.
+GEMINI_THINKING = os.environ.get("GEMINI_THINKING", "low").strip().lower()   # low | medium | high | off (model default)
+_gemini_no_thinking_cfg = False
+
+
+def _gemini_post(body: dict, timeout: float) -> dict:
+    """POST to generateContent with low thinking and a roomy output cap; returns the JSON reply or raises ValueError."""
+    global _gemini_no_thinking_cfg
+    cfg = body.setdefault("generationConfig", {})
+    cfg["maxOutputTokens"] = max(int(cfg.get("maxOutputTokens") or 0), 4096)
+    if GEMINI_THINKING not in ("", "off", "default") and not _gemini_no_thinking_cfg:
+        cfg["thinkingConfig"] = {"thinkingLevel": GEMINI_THINKING}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    # Key goes in a header (not the URL) so it never appears in logs or error messages.
+    hdrs = {"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"}
+    r = _requests.post(url, timeout=timeout, headers=hdrs, json=body)
+    data = r.json()
+    if r.status_code == 400 and "thinking" in str((data.get("error") or {}).get("message", "")).lower() and "thinkingConfig" in cfg:
+        _gemini_no_thinking_cfg = True
+        cfg.pop("thinkingConfig", None)
+        r = _requests.post(url, timeout=timeout, headers=hdrs, json=body)
+        data = r.json()
+    if r.status_code != 200:
+        raise ValueError((data.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    return data
+
+
 def _gemini_call(system: str, user: str, search: bool) -> tuple[str, list[dict], list[str]]:
-    config = {"temperature": 0, "maxOutputTokens": 2048}
+    config = {"temperature": 0}
     body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": config}
     if search:
         body["tools"] = [{"google_search": {}}]  # grounding with Google Search (JSON mode can't be combined with it)
     else:
         config["responseMimeType"] = "application/json"
-    # Key goes in a header (not the URL) so it never appears in logs or error messages.
-    r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent", timeout=40 if search else 25,
-                       headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"}, json=body)
-    data = r.json()
-    if r.status_code != 200:
-        raise ValueError((data.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    data = _gemini_post(body, timeout=20 if search else 15)
     block = (data.get("promptFeedback") or {}).get("blockReason")
     if block:
         raise ValueError(f"blocked by Gemini safety filter ({block})")
@@ -2434,6 +2570,8 @@ PG_EXAMPLES = [
      "body": "مبارک ہو! آپ کو بینظیر انکم سپورٹ پروگرام کی طرف سے 25000 روپے کی امدادی رقم ملی ہے۔ رقم وصول کرنے کے لیے 500 روپے فیس جمع کرائیں۔"},
     {"key": "hi-kyc", "title": "Hindi: KYC account block", "tag": "PHISH", "mode": "sms", "sender": "VK-SBIINB", "subject": "",
      "body": "प्रिय ग्राहक, आपका खाता आज बंद कर दिया जाएगा। तुरंत केवाईसी अपडेट करने के लिए इस लिंक पर क्लिक करें http://sbi-kyc-update.in"},
+    {"key": "de-mama", "title": "German: \"Hi Mum\" new number", "tag": "PHISH", "mode": "sms", "sender": "+49 1521 2345678", "subject": "",
+     "body": "Hallo Mama, das ist meine neue Nummer, mein Handy ist kaputt. Kannst du mir bitte heute noch eine Rechnung überweisen? Ich zahle es dir morgen zurück."},
     {"key": "roman-urdu-call", "title": "Roman Urdu: bank caller", "tag": "PHISH", "mode": "call", "sender": "+92 300 1234567", "subject": "",
      "body": "Assalam o alaikum, main bank se baat kar raha hoon. Aap ka account block ho gaya hai, foran apne mobile par aaya hua code bata dein."},
 ]

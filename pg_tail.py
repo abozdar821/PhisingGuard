@@ -64,8 +64,9 @@ OCR_PROMPT = (
     "the original language and script — never translate. "
     "app: the messaging or email app if recognisable. app_warning: if the app shows its own warning about the message "
     "(Gmail's \"Why is this message in spam?\" or \"Be careful with this message\", \"Suspected spam\", \"Report junk\"), "
-    "quote it briefly; otherwise empty. If the image is not a message or email, set readable to false "
-    "and say why in notes.")
+    "quote it briefly; otherwise empty. If the image also shows charts, graphs, tables of figures, logos, photos or "
+    "illustrations, leave them out: don't copy axis labels, legends, chart numbers or captions, only the message text. "
+    "If the image is not a message or email (for example only a chart or a photo), set readable to false and say why in notes.")
 
 _MAGIC = [(b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF8", "image/gif"), (b"RIFF", "image/webp")]
 
@@ -136,16 +137,10 @@ def _read_with_claude(data: bytes, mime: str) -> dict:
 
 def _read_with_gemini(data: bytes, mime: str) -> dict:
     data, mime = _shrink(data, mime, max_bytes=15_000_000)
-    r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                       timeout=60, headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"},
-                       json={"contents": [{"role": "user", "parts": [
-                           {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-                           {"text": OCR_PROMPT}]}],
-                           "generationConfig": {"temperature": 0, "maxOutputTokens": 2048,
-                                                "responseMimeType": "application/json"}})
-    body = r.json()
-    if r.status_code != 200:
-        raise ValueError((body.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    body = _gemini_post({"contents": [{"role": "user", "parts": [
+                             {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
+                             {"text": OCR_PROMPT}]}],
+                         "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}, timeout=45)
     if (body.get("promptFeedback") or {}).get("blockReason"):
         raise ValueError("blocked by Gemini's safety filter")
     parts = (((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
@@ -184,6 +179,22 @@ def _clean_addr(a: str) -> str:
     return a.replace("|", "l").strip(".,;:").lower()
 
 
+_CHART_TOKEN = re.compile(
+    r"(?i)^(?:[-+]?[$€£₹¥]?\d{1,4}(?:[.,]\d{1,3})*(?:[kmb%]|k€|%)?|q[1-4]|h[12]|fy\d{2,4}|"
+    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|mär|mai|okt|dez)[a-zä]{0,6}\.?|[|•·■□▪◆●○◼◻–—_-]+)$")
+
+
+def chart_noise(ln: str) -> bool:
+    """Axis ticks, scales, month or quarter rows that OCR picks up from charts and graphs ("0 20 40 60", "Jan Feb Mar")."""
+    if re.search(r"https?://|@|www\.|\w\.\w{2,}/", ln):
+        return False
+    toks = ln.split()
+    if len(toks) < 3:
+        return False
+    hits = sum(1 for t in toks if _CHART_TOKEN.match(t.strip(",;:()")))
+    return hits == len(toks) or (len(toks) >= 5 and hits >= 0.8 * len(toks))
+
+
 def _junk(ln: str) -> bool:
     """Screen furniture Tesseract turns into fragments: status bars, icons ("QO 4", "[1 O < K")."""
     words = len(re.findall(r"[A-Za-zÀ-ɏ؀-ۿऀ-ॿ]{3,}", ln))
@@ -194,7 +205,7 @@ def _junk(ln: str) -> bool:
 
 def parse_ocr_text(text: str, screen: bool = False) -> dict:
     """Best-effort structure for plain OCR output (no AI available). screen=True: text came from a phone screenshot."""
-    lines = [ln.strip() for ln in (text or "").splitlines()]
+    lines = [ln.strip() for ln in bounded_text(text).splitlines()]
     lines = [ln for ln in lines if ln]
     sender = subject = reply_to = app_warning = ""
     mode = "sms"
@@ -234,7 +245,7 @@ def parse_ocr_text(text: str, screen: bool = False) -> dict:
         else:
             keep.append(ln)
     if screen:
-        keep = [x for x in keep if not _junk(x)]
+        keep = [x for x in keep if not _junk(x) and not chart_noise(x)]
     body = _join_wrapped(keep)
     out = {"mode": mode, "sender": sender, "subject": subject, "body": body, "app": "", "app_warning": app_warning,
            "headers": {"reply_to": reply_to} if reply_to else None,
@@ -247,8 +258,10 @@ def _read_with_tesseract(data: bytes, mime: str) -> dict:
     import pytesseract
     from PIL import Image, ImageOps
     img = Image.open(io.BytesIO(data))
+    if img.width * img.height > _DOC_IMAGE_MAX:   # decompression bomb / absurd size: refuse before decoding
+        raise ValueError("That image is too large. Try a smaller screenshot.")
     img = ImageOps.exif_transpose(img).convert("L")
-    if img.width < 1200:  # upscale small screenshots for better accuracy
+    if img.width < 1200 and img.width * img.height * 4 <= 25_000_000:  # upscale small screenshots for better accuracy
         img = img.resize((img.width * 2, img.height * 2))
     if sum(img.resize((1, 1)).getdata()) < 128:  # dark-mode screenshot → invert for OCR
         img = ImageOps.invert(img)
@@ -336,16 +349,11 @@ def transcribe_audio(data: bytes, mime: str) -> dict:
             if name == "Gemini":
                 if len(data) > 15_000_000:
                     raise ValueError("recording is too long (over 15 MB)")
-                r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                                   timeout=90, headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"},
-                                   json={"contents": [{"role": "user", "parts": [
-                                       {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-                                       {"text": TRANSCRIBE_PROMPT}]}],
-                                       "generationConfig": {"temperature": 0, "maxOutputTokens": 4096,
-                                                            "responseMimeType": "application/json"}})
-                body = r.json()
-                if r.status_code != 200:
-                    raise ValueError((body.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+                body = _gemini_post({"contents": [{"role": "user", "parts": [
+                                         {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
+                                         {"text": TRANSCRIBE_PROMPT}]}],
+                                     "generationConfig": {"temperature": 0, "maxOutputTokens": 8192,
+                                                          "responseMimeType": "application/json"}}, timeout=90)
                 parts = (((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
                 raw = _parse_json_reply("".join(p.get("text", "") for p in parts if not p.get("thought")))
             else:
@@ -451,8 +459,18 @@ def _fix_styled_name(name: str) -> str:
     return re.sub(f"(?<=[a-z]) (?=[{_STYLED}][a-z]?)", "", name)
 
 
+def bounded_text(text: str, limit: int = 50_000, line: int = 1000) -> str:
+    """Real messages are short: keep the first 50,000 characters and break very long lines, so the layout
+    patterns below stay fast on hostile uploads (a 12 MB file of one endless line)."""
+    out = []
+    for ln in (text or "")[:limit].splitlines():
+        out.extend(ln[i:i + line] for i in range(0, len(ln), line)) if len(ln) > line else out.append(ln)
+    return "\n".join(out)
+
+
 def parse_mail_print(text: str) -> dict | None:
     """Email printed to PDF from Gmail / Outlook: subject, then 'Name <addr>  date', Reply-to:, To:, body."""
+    text = bounded_text(text)
     lines = [ln.rstrip() for ln in (text or "").splitlines()]
     for n in range(min(len(lines), 30)):  # the date printed in a column to the right of the sender
         lines[n] = _DATE_COLUMN.sub("", lines[n])
@@ -545,6 +563,253 @@ def _zip_chat(data: bytes) -> tuple[str, str] | None:
         return None
 
 
+READ_DOC_PICTURES = os.environ.get("PHISHGUARD_DOC_PICTURES", "1") != "0"   # 0 = read only the text of PDFs and Word files
+MAX_DOC_IMAGES = 3            # pictures read per document (each one is a screenshot read)
+_DOC_IMAGE_MIN = 250 * 120    # smaller pictures are icons, logos and bullets
+_DOC_IMAGE_MAX = 40_000_000   # pixels: refuse decompression bombs
+
+
+def _image_size(data: bytes) -> tuple[int, int] | None:
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size
+    except Exception:
+        return None
+
+
+def _as_png(data: bytes) -> bytes | None:
+    """Any picture PIL can open → PNG bytes the screenshot reader accepts (PDFs often hold JPEG 2000, TIFF or raw images)."""
+    if _sniff(data):
+        return data
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            if im.size[0] * im.size[1] > _DOC_IMAGE_MAX:
+                return None
+            out = io.BytesIO()
+            im.convert("RGB").save(out, "PNG")
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def decode_qr(data: bytes) -> str:
+    """Text of a QR code in a picture, if OpenCV is installed (pip install opencv-python-headless); else ''."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return ""
+    try:
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+        if img is None or img.size > _DOC_IMAGE_MAX:
+            return ""
+        text, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+        return (text or "").strip()[:2000]
+    except Exception:
+        return ""
+
+
+def doc_pictures(images: list[bytes], limit: int = MAX_DOC_IMAGES) -> dict:
+    """Read the biggest pictures in a document: text in screenshots pasted into it, and QR codes.
+    Charts and logos read as no message and are left out."""
+    sized = []
+    for b in images[:60]:
+        wh = _image_size(b)
+        if wh and _DOC_IMAGE_MIN <= wh[0] * wh[1] <= _DOC_IMAGE_MAX and min(wh) >= 60:
+            sized.append((wh[0] * wh[1], b))
+    sized.sort(key=lambda x: -x[0])
+    texts, qrs, engine, errors = [], [], "", []
+    for _, b in sized[:limit]:
+        q = decode_qr(b)
+        if q and q not in qrs:
+            qrs.append(q)
+        png = _as_png(b)
+        if not png or not ocr_engines():
+            continue
+        try:
+            r = read_screenshot(png)
+        except Exception as exc:
+            errors.append(str(exc)[:120])
+            continue
+        body = "\n".join(x for x in (r.get("body") or "").splitlines() if not chart_noise(x)).strip()
+        if body and r.get("readable", True):
+            texts.append(body)
+            engine = engine or r.get("engine", "")
+    return {"texts": texts, "qrs": qrs, "engine": engine, "errors": errors, "found": len(sized)}
+
+
+def _words(s: str) -> set[str]:
+    return set(re.findall(r"\w{3,}", (s or "").lower()))
+
+
+def add_picture_text(parsed: dict, pics: dict, label: str = "Text in pictures") -> dict:
+    """Append picture text that isn't already in the body (and any QR codes) to a parsed document."""
+    body, extra = parsed.get("body") or "", []
+    for t in pics.get("texts", []):
+        w = _words(t)
+        if w and len(w & _words(body)) < 0.8 * len(w):
+            extra.append(t)
+    tail = ""
+    if extra:
+        tail += f"\n\n{label}:\n" + "\n\n".join(extra)
+    for q in pics.get("qrs", []):
+        tail += "\n\nQR code: " + q
+    if not tail:
+        return parsed
+    body = (body[:max(0, 5000 - len(tail))] + tail).strip()[:5000]
+    return {**parsed, "body": body, "readable": True}
+
+
+def _pdf_images(data: bytes, pages: int = 10) -> list[bytes]:
+    """Pictures embedded in a PDF (poppler's pdfimages, else pypdf)."""
+    import glob
+    import shutil
+    import subprocess
+    import tempfile
+    out: list[bytes] = []
+    if shutil.which("pdfimages"):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "in.pdf")
+            with open(src, "wb") as f:
+                f.write(data)
+            try:
+                subprocess.run(["pdfimages", "-l", str(pages), "-png", src, os.path.join(d, "img")], capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            for fn in sorted(glob.glob(os.path.join(d, "img-*.png")))[:60]:
+                if os.path.getsize(fn) <= 15_000_000:
+                    with open(fn, "rb") as f:
+                        out.append(f.read())
+        if out:
+            return out
+    try:
+        import io
+        from pypdf import PdfReader
+        for pg in PdfReader(io.BytesIO(data)).pages[:pages]:
+            for im in list(pg.images)[:20]:
+                if len(im.data) <= 15_000_000:
+                    out.append(im.data)
+            if len(out) >= 60:
+                break
+    except Exception:
+        pass
+    return out
+
+
+def _pdf_pages_as_images(data: bytes, pages: int = 3) -> list[bytes]:
+    """Render the first pages of a scanned PDF to PNG (poppler's pdftoppm)."""
+    import glob
+    import shutil
+    import subprocess
+    import tempfile
+    if not shutil.which("pdftoppm"):
+        return []
+    with tempfile.TemporaryDirectory() as d:
+        src = os.path.join(d, "in.pdf")
+        with open(src, "wb") as f:
+            f.write(data)
+        try:
+            subprocess.run(["pdftoppm", "-r", "150", "-png", "-l", str(pages), src, os.path.join(d, "pg")], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        out = []
+        for fn in sorted(glob.glob(os.path.join(d, "pg-*.png")))[:pages]:
+            with open(fn, "rb") as f:
+                out.append(f.read())
+        return out
+
+
+def read_scanned_pdf(data: bytes) -> dict:
+    """A PDF that is only pictures (a scan, or screenshots saved as PDF): read each page like a screenshot."""
+    if not ocr_engines():
+        raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+    imgs = _pdf_pages_as_images(data) or [b for b in (_as_png(x) for x in _pdf_images(data, 3)) if b]
+    if not imgs:
+        raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+    parts, errors = [], []
+    for png in imgs[:3]:
+        try:
+            r = read_screenshot(png)
+        except Exception as exc:
+            errors.append(str(exc)[:120])
+            continue
+        r = {**r, "body": "\n".join(x for x in (r.get("body") or "").splitlines() if not chart_noise(x)).strip()}
+        if (r.get("body") or "").strip():
+            parts.append(r)
+    if not parts:
+        raise ValueError("Couldn't find message text in this scanned PDF. Try a screenshot of it instead.")
+    out = parts[0] if len(parts) == 1 else merge_extracted(parts)
+    pics = {"qrs": [q for q in (decode_qr(x) for x in imgs[:3]) if q]}
+    out = add_picture_text(out, pics)
+    return {**out, "engine": f"{parts[0].get('engine', 'OCR')} (scanned PDF)", "app": "PDF", "fallback_errors": errors}
+
+
+_DOCX_PARA = re.compile(r"</w:p>|<w:br/>|<w:cr/>")
+_DOCX_TEXT = re.compile(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>|<w:tab/>")
+_DOCX_LINK = re.compile(r'<Relationship\s[^>]*?Target="([^"]+)"[^>]*?TargetMode="External"|'
+                        r'<Relationship\s[^>]*?TargetMode="External"[^>]*?Target="([^"]+)"')
+_ZIP_ENTRY_MAX = 25_000_000   # bytes, once unpacked
+_ZIP_TOTAL_MAX = 60_000_000
+
+
+def read_docx(data: bytes) -> dict | None:
+    """A Word document (.docx): its text, the web addresses behind its links, and the pictures pasted into it.
+    The XML is read with regular expressions, never an XML parser, so no entity tricks can run; unpacked sizes are capped."""
+    import html
+    import io
+    import zipfile
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, OSError, RuntimeError):
+        return None
+    with z:
+        infos = {i.filename: i for i in z.infolist()[:2000]}
+        main = infos.get("word/document.xml")
+        if not main:
+            return None
+        if main.file_size > _ZIP_ENTRY_MAX:
+            raise ValueError("That Word document is too large to read here.")
+        xml = z.read(main).decode("utf-8", "replace")
+        paras = []
+        for chunk in _DOCX_PARA.split(xml):
+            line = "".join(html.unescape(m.group(1)) if m.group(1) is not None else "\t" for m in _DOCX_TEXT.finditer(chunk))
+            paras.append(line.strip())
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(paras)).strip()
+        links = []
+        rels = infos.get("word/_rels/document.xml.rels")
+        if rels and rels.file_size <= 2_000_000:
+            for m in _DOCX_LINK.finditer(z.read(rels).decode("utf-8", "replace")):
+                links.append(html.unescape(m.group(1) or m.group(2)))
+        images, total = [], 0
+        for name, info in infos.items():
+            if not name.startswith("word/media/") or not name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff")):
+                continue
+            if info.file_size > 15_000_000 or total + info.file_size > _ZIP_TOTAL_MAX:
+                continue
+            total += info.file_size
+            images.append(z.read(info))
+    if text:
+        parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
+        if not parse_mail_print(text) and not parsed["sender"]:
+            parsed = {**parsed, "body": re.sub(r"[ \t]+", " ", text).strip()[:5000]}
+    else:
+        parsed = {"mode": "sms", "sender": "", "subject": "", "body": "", "headers": None}
+    extra = hidden_links(links, parsed["body"])
+    if extra:
+        tail = "\n\nLinks in this document:\n" + "\n".join(extra)
+        parsed = {**parsed, "body": parsed["body"][:5000 - len(tail)] + tail}
+    pics = doc_pictures(images)
+    parsed = add_picture_text(parsed, pics)
+    body = (parsed.get("body") or "").strip()
+    engine = "Word document" + (f" + {pics['engine']} (pictures)" if pics["texts"] else "")
+    return {**parsed, "engine": engine, "app": "Word", "readable": bool(body),
+            "notes": "" if body else "No message text found in the Word document.", "fallback_errors": pics["errors"]}
+
+
 def read_file(data: bytes, filename: str = "") -> dict:
     """Turn any supported upload into {mode, sender, subject, body, headers, ...} for the scanner."""
     name = (filename or "").lower()
@@ -561,23 +826,29 @@ def read_file(data: bytes, filename: str = "") -> dict:
         text, links = _pdf_text(data)
         text = clean_pdf_text(text)
         if len(text.strip()) < 20:
-            raise ValueError("This PDF has no text in it (it's probably a scanned image). Upload a screenshot of it instead.")
+            return read_scanned_pdf(data)   # only pictures: read the pages like screenshots
         parsed = parse_mail_print(text) or {**parse_ocr_text(text), "headers": None}
         extra = hidden_links(links, parsed["body"])
         if extra:  # the real web addresses behind "Click here" / "Update payment" buttons
             label = "Links in this email" if parsed["mode"] == "email" else "Links in this document"
             tail = f"\n\n{label}:\n" + "\n".join(extra)
             parsed = {**parsed, "body": parsed["body"][:5000 - len(tail)] + tail}
-        return {**parsed, "engine": "PDF text", "app": "PDF", "readable": bool(parsed["body"]),
-                "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": []}
+        pics = doc_pictures(_pdf_images(data)) if READ_DOC_PICTURES else {"texts": [], "qrs": [], "engine": "", "errors": []}
+        parsed = add_picture_text(parsed, pics)
+        engine = "PDF text" + (f" + {pics['engine']} (pictures)" if pics["texts"] else "")
+        return {**parsed, "engine": engine, "app": "PDF", "readable": bool(parsed["body"]),
+                "notes": "" if parsed["body"] else "No message text found in the PDF.", "fallback_errors": pics["errors"]}
     if name.endswith(".eml") or _looks_like_eml(data):
         return parse_eml(data)
     if data.startswith(b"PK\x03\x04"):
+        doc = read_docx(data)
+        if doc is not None:
+            return doc
         chat = _zip_chat(data)
         if not chat:
             raise ValueError("That .zip file doesn't hold a WhatsApp chat. Export the chat from WhatsApp and upload that file.")
         return parse_whatsapp(chat[0], filename or chat[1])
-    unsupported = "That file type isn't supported. Use a screenshot, PDF, .eml email, text file, WhatsApp chat export or voicemail recording."
+    unsupported = "That file type isn't supported. Use a screenshot, PDF, Word document, .eml email, text file, WhatsApp chat export or voicemail recording."
     if name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".pdf")):
         raise ValueError("That file is damaged or isn't really a " + name.rsplit(".", 1)[1].upper() + ". " + unsupported.split(". ", 1)[1])
     try:
@@ -811,8 +1082,40 @@ def _developer() -> bool:
 DEV_PATHS = {"/api/phishguard/training", "/api/phishguard/training/remove"}
 
 
+# Host names a browser may use to reach PhishGuard when no token is set (anything else could be DNS rebinding).
+EXTRA_HOSTS = {h.strip().lower() for h in os.environ.get("PHISHGUARD_HOSTS", "").split(",") if h.strip()}
+
+
+def _known_host() -> bool:
+    host = (request.host or "").rsplit(":", 1)[0].strip("[]").lower() if not (request.host or "").startswith("[") \
+        else (request.host or "")[1:].split("]")[0].lower()
+    if not host or host in EXTRA_HOSTS or host == "localhost" or host.endswith((".local", ".ts.net", ".localhost")):
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _cross_site_write() -> bool:
+    """A state-changing request sent by another website (CSRF)."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return False
+    if request.headers.get("Sec-Fetch-Site", "") == "cross-site":
+        return True
+    origin = request.headers.get("Origin", "")
+    if not origin or (origin == "null" and request.path == "/share"):
+        return False
+    return urlparse(origin).netloc.lower() != (request.host or "").lower()
+
+
 @app.before_request
 def _guard():
+    if _cross_site_write():
+        return jsonify({"error": "Requests from other websites aren't allowed"}), 403
+    if not APP_TOKEN and not _known_host():
+        return jsonify({"error": "Unknown host name. Set PHISHGUARD_HOSTS to the name you use, or set PHISHGUARD_TOKEN."}), 403
     if request.path in OPEN_PATHS:
         return None
     if not _authorized():
@@ -828,6 +1131,8 @@ def _guard():
 def _headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Frame-Options", "DENY")   # no clickjacking: PhishGuard is never shown inside another site
+    resp.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'")
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -921,7 +1226,9 @@ def pg_config():
 
 
 def _do_scan(mode, sender, subject, body, headers=None, lang="en", app_warning="", country="") -> dict:
-    scan = phishguard_scan(mode, sender.strip(), subject.strip(), body.strip(), headers, lang, str(app_warning or "")[:120], str(country or "")[:8])
+    # every path (typed, uploaded, shared) is capped here: some rules slow down sharply on very long text
+    scan = phishguard_scan(mode, str(sender or "").strip()[:200], str(subject or "").strip()[:300], str(body or "").strip()[:5000],
+                           headers, lang, str(app_warning or "")[:120], str(country or "")[:8])
     _save_scan(scan)
     return scan
 
@@ -1126,7 +1433,8 @@ MANIFEST = {
     "share_target": {"action": "/share", "method": "POST", "enctype": "multipart/form-data",
                      "params": {"title": "title", "text": "text", "url": "url",
                                 "files": [{"name": "file", "accept": ["image/*", "application/pdf", "message/rfc822", ".eml",
-                                                                      "text/plain", ".txt", "application/zip", ".zip", "audio/*"]}]}},
+                                                                      "text/plain", ".txt", "application/zip", ".zip", "audio/*",
+                                                                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"]}]}},
 }
 SERVICE_WORKER = """const CACHE = "phishguard-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
