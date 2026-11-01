@@ -136,16 +136,10 @@ def _read_with_claude(data: bytes, mime: str) -> dict:
 
 def _read_with_gemini(data: bytes, mime: str) -> dict:
     data, mime = _shrink(data, mime, max_bytes=15_000_000)
-    r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                       timeout=60, headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"},
-                       json={"contents": [{"role": "user", "parts": [
-                           {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-                           {"text": OCR_PROMPT}]}],
-                           "generationConfig": {"temperature": 0, "maxOutputTokens": 2048,
-                                                "responseMimeType": "application/json"}})
-    body = r.json()
-    if r.status_code != 200:
-        raise ValueError((body.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    body = _gemini_post({"contents": [{"role": "user", "parts": [
+                             {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
+                             {"text": OCR_PROMPT}]}],
+                         "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}, timeout=45)
     if (body.get("promptFeedback") or {}).get("blockReason"):
         raise ValueError("blocked by Gemini's safety filter")
     parts = (((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
@@ -336,16 +330,11 @@ def transcribe_audio(data: bytes, mime: str) -> dict:
             if name == "Gemini":
                 if len(data) > 15_000_000:
                     raise ValueError("recording is too long (over 15 MB)")
-                r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                                   timeout=90, headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"},
-                                   json={"contents": [{"role": "user", "parts": [
-                                       {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-                                       {"text": TRANSCRIBE_PROMPT}]}],
-                                       "generationConfig": {"temperature": 0, "maxOutputTokens": 4096,
-                                                            "responseMimeType": "application/json"}})
-                body = r.json()
-                if r.status_code != 200:
-                    raise ValueError((body.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+                body = _gemini_post({"contents": [{"role": "user", "parts": [
+                                         {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
+                                         {"text": TRANSCRIBE_PROMPT}]}],
+                                     "generationConfig": {"temperature": 0, "maxOutputTokens": 8192,
+                                                          "responseMimeType": "application/json"}}, timeout=90)
                 parts = (((body.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
                 raw = _parse_json_reply("".join(p.get("text", "") for p in parts if not p.get("thought")))
             else:

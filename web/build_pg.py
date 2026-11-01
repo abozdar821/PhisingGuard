@@ -124,17 +124,33 @@ const FREEMAIL = new Set(PG_DATA.FREEMAIL || []);
 const GEMINI_SEARCH_NOTE = "\\nYou can use Google Search. Look up the items under <lookups> (sender domain or number, link websites, phone numbers) " +
   "for public scam or phishing reports, e.g. FTC, BBB Scam Tracker, news, forums and scam-report sites, and say briefly in the reasoning what you " +
   "found (or that you found nothing). Never search for the recipient's own name, email address or other personal details from the message.";
+// Newer Flash models think at a "medium" level by default; that thinking counts against maxOutputTokens and made
+// answers slow or cut off (then PhishGuard asked twice). Low thinking is plenty for a scam verdict. A model that
+// rejects thinkingLevel is asked again without it, and this browser remembers that.
+const KNT = "phishguard.gemini.nothink";
 async function gemCall(parts, opts) {
+  opts = opts || {};
   const key = gemKey();
   if (!key) throw new Error("Add your Gemini API key first (History → Gemini backup assistant).");
-  const body = {contents: [{role: "user", parts}], generationConfig: {temperature: 0, maxOutputTokens: 2048}};
-  if (opts && opts.search) body.tools = [{google_search: {}}]; else body.generationConfig.responseMimeType = "application/json";
-  let r;
-  try {
-    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-                    {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"}, body: JSON.stringify(body)});
-  } catch (e) { throw new Error("Couldn't reach Gemini from this page. Open PhishGuard in a normal browser tab, such as your own website, to use Gemini."); }
-  const data = await r.json().catch(() => ({}));
+  const cfg = {temperature: 0, maxOutputTokens: 4096};
+  if (!ls.get(KNT)) cfg.thinkingConfig = {thinkingLevel: "low"};
+  const body = {contents: [{role: "user", parts}], generationConfig: cfg};
+  if (opts.search) body.tools = [{google_search: {}}]; else cfg.responseMimeType = "application/json";
+  const post = async () => {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), opts.timeout || 25000);
+    try {
+      return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+                         {method: "POST", headers: {"x-goog-api-key": key, "content-type": "application/json"}, body: JSON.stringify(body), signal: ctl.signal});
+    } catch (e) {
+      if (e && e.name === "AbortError") throw new Error("Gemini took too long to answer. Please try again.");
+      throw new Error("Couldn't reach Gemini from this page. Open PhishGuard in a normal browser tab, such as your own website, to use Gemini.");
+    } finally { clearTimeout(timer); }
+  };
+  let r = await post(), data = await r.json().catch(() => ({}));
+  if (r.status === 400 && cfg.thinkingConfig && /thinking/i.test((data.error && data.error.message) || "")) {
+    ls.set(KNT, "1"); delete cfg.thinkingConfig;
+    r = await post(); data = await r.json().catch(() => ({}));
+  }
   if (!r.ok) throw new Error("Gemini: " + ((data.error && data.error.message) || "HTTP " + r.status));
   const c = (data.candidates || [])[0];
   if (!c) throw new Error("Gemini didn't answer" + (data.promptFeedback && data.promptFeedback.blockReason ? " (blocked by its safety filter)." : "."));
@@ -158,9 +174,9 @@ function lookups(scan) {
 async function askGemini(scan) {
   const look = lookups(scan), prompt = E.aiPrompt(scan) + (look ? `\\n<lookups>${look}</lookups>` : "");
   let out;
-  try { out = await gemCall([{text: prompt + GEMINI_SEARCH_NOTE}], {search: true}); }
+  try { out = await gemCall([{text: prompt + GEMINI_SEARCH_NOTE}], {search: true, timeout: 20000}); }
   catch (e) { if (/reach Gemini|API key|permission|denied/i.test(e.message)) throw e; out = null; }
-  if (!out || !/\\{/.test(out.text)) out = {...(await gemCall([{text: prompt}], {})), sources: [], searched: []};
+  if (!out || !/\\{/.test(out.text)) out = {...(await gemCall([{text: prompt}], {timeout: 15000})), sources: [], searched: []};
   return {...parseJson(out.text), sources: out.sources, searched: out.searched};
 }
 const b64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] || ""); fr.onerror = () => rej(new Error("Couldn't read that file.")); fr.readAsDataURL(blob); });
@@ -175,7 +191,7 @@ function fromReader(raw, engine) {
 }
 async function geminiReads(blob) {
   if (blob.size > 15 * 1024 * 1024) throw new Error("That image is too large. Try a smaller screenshot.");
-  const out = await gemCall([{text: OCR_PROMPT}, {inline_data: {mime_type: blob.type || "image/png", data: await b64(blob)}}], {});
+  const out = await gemCall([{text: OCR_PROMPT}, {inline_data: {mime_type: blob.type || "image/png", data: await b64(blob)}}], {timeout: 45000});
   return fromReader(parseJson(out.text), "Gemini");
 }
 async function safeBrowsing(urls) {  // {url: kind}, or null when this key can't use Safe Browsing

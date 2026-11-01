@@ -459,6 +459,23 @@ check("without Google Search access Gemini still answers (plain JSON mode)", op.
 check("a key that can't use Safe Browsing is rested instead of retried on every scan", m._sb_off_until > time.time() and m._sb_key() == "", m._sb_off_until)
 cfg = c.get("/api/phishguard/config").json
 check("config reports Gemini's Google Search", cfg.get("ai_search") is True, cfg.get("ai_search"))
+gcfg = gem[0]["json"]["generationConfig"] if gem else {}
+check("Gemini is asked to think briefly, with room for the answer (speed fix)",
+      gcfg.get("thinkingConfig") == {"thinkingLevel": "low"} and gcfg.get("maxOutputTokens", 0) >= 4096, gcfg)
+seen.clear()
+rejected = []
+def old_model(url, **kw):  # a 2.5-era model that doesn't know thinkingLevel
+    if "generativelanguage" in url and "thinkingConfig" in kw["json"].get("generationConfig", {}):
+        rejected.append(url)
+        return _G(400, {"error": {"message": "Invalid JSON payload: thinking level is not supported for this model."}})
+    return google(url, **kw)
+with mock.patch.object(m._requests, "post", side_effect=old_model):
+    m._rate.clear(); m._gemini_no_thinking_cfg = False
+    r = c.post("/api/phishguard/scan", json={"mode": "sms", "sender": "", "body": "Your parcel is held, pay here: https://parcel-fee.example/x"}).json
+op = next((o for o in r["ai"] if o["provider"] == "Gemini"), {})
+check("a model that rejects the thinking setting is asked again without it, then remembered",
+      op.get("score") == 90 and m._gemini_no_thinking_cfg is True and len(rejected) == 1, (op, m._gemini_no_thinking_cfg, len(rejected)))
+m._gemini_no_thinking_cfg = False
 m.GEMINI_API_KEY, m.LOOKUPS, m._sb_off_until = "", False, 0.0
 print(f"\n{len(fails)} failures (after Gemini checks)", fails)
 

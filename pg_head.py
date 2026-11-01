@@ -24,6 +24,7 @@ Environment
   ANTHROPIC_API_KEY   Claude: AI second opinion + screenshot reading   PHISHGUARD_MODEL  model id
   GEMINI_API_KEY      Gemini: AI second opinion + screenshot reading   GEMINI_MODEL      model id
   GEMINI_SEARCH       1 (default): Gemini checks Google Search for public scam reports · 0: off
+  GEMINI_THINKING     low (default, fast) | medium | high | off: how long Gemini thinks before answering
   GOOGLE_SAFE_BROWSING_KEY  Google's dangerous-sites list (if unset, the Gemini key is tried; it works when
                       the Safe Browsing API is enabled for that key's Google Cloud project)
   (Keys can also go in a .env file next to this app, one KEY=value per line.)

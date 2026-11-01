@@ -354,6 +354,8 @@ UI = [
     ["Gemini's answer wasn't in the expected format. Try again.", "La respuesta de Gemini no tenía el formato esperado. Inténtelo de nuevo.",
      "Gemini کا جواب متوقع شکل میں نہیں تھا۔ دوبارہ کوشش کریں۔", "Gemini का जवाब अपेक्षित रूप में नहीं था। फिर से कोशिश करें।"],
     ["Gemini didn't answer.", "Gemini no respondió.", "Gemini نے جواب نہیں دیا۔", "Gemini ने जवाब नहीं दिया।"],
+    ["Gemini took too long to answer. Please try again.", "Gemini tardó demasiado en responder. Inténtelo de nuevo.",
+     "Gemini نے جواب دینے میں بہت دیر لگا دی۔ براہ کرم دوبارہ کوشش کریں۔", "Gemini ने जवाब देने में बहुत देर लगा दी। कृपया फिर से कोशिश करें।"],
     ["Gemini didn't answer (blocked by its safety filter).", "Gemini no respondió (lo bloqueó su filtro de seguridad).",
      "Gemini نے جواب نہیں دیا (اس کے حفاظتی فلٹر نے روک دیا)۔", "Gemini ने जवाब नहीं दिया (उसके सुरक्षा फ़िल्टर ने रोक दिया)।"],
     ["Thinking…", "Pensando…", "سوچ رہا ہے…", "सोच रहा है…"],

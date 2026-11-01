@@ -28,6 +28,7 @@ Env
   SOC_ADMIN_TOKEN      require X-SOC-Token header for admin actions (block, feedback, demo)
   ANTHROPIC_API_KEY    enable Claude opinion      PHISHGUARD_MODEL   Claude model id
   GEMINI_API_KEY       enable Gemini opinion      GEMINI_MODEL       Gemini model id
+  GEMINI_THINKING      low (default) | medium | high | off: how long Gemini thinks before answering
   PHISHGUARD_DATA      path of the training store   SOC_HOST / SOC_PORT   bind address
 """
 
@@ -2060,20 +2061,45 @@ _GEMINI_SEARCH_NOTE = (
     "personal details from the message.")
 
 
+# Newer Flash models "think" at a medium level by default. That thinking counts against maxOutputTokens and made
+# opinions slow, or cut off before the answer (then PhishGuard asked a second time). A short, low-thinking answer is
+# plenty for a scam verdict. "low" works on every current Flash and Flash-Lite model; a model that rejects
+# thinkingLevel (older 2.5 models) is asked again without it, and remembered.
+GEMINI_THINKING = os.environ.get("GEMINI_THINKING", "low").strip().lower()   # low | medium | high | off (model default)
+_gemini_no_thinking_cfg = False
+
+
+def _gemini_post(body: dict, timeout: float) -> dict:
+    """POST to generateContent with low thinking and a roomy output cap; returns the JSON reply or raises ValueError."""
+    global _gemini_no_thinking_cfg
+    cfg = body.setdefault("generationConfig", {})
+    cfg["maxOutputTokens"] = max(int(cfg.get("maxOutputTokens") or 0), 4096)
+    if GEMINI_THINKING not in ("", "off", "default") and not _gemini_no_thinking_cfg:
+        cfg["thinkingConfig"] = {"thinkingLevel": GEMINI_THINKING}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    # Key goes in a header (not the URL) so it never appears in logs or error messages.
+    hdrs = {"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"}
+    r = _requests.post(url, timeout=timeout, headers=hdrs, json=body)
+    data = r.json()
+    if r.status_code == 400 and "thinking" in str((data.get("error") or {}).get("message", "")).lower() and "thinkingConfig" in cfg:
+        _gemini_no_thinking_cfg = True
+        cfg.pop("thinkingConfig", None)
+        r = _requests.post(url, timeout=timeout, headers=hdrs, json=body)
+        data = r.json()
+    if r.status_code != 200:
+        raise ValueError((data.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    return data
+
+
 def _gemini_call(system: str, user: str, search: bool) -> tuple[str, list[dict], list[str]]:
-    config = {"temperature": 0, "maxOutputTokens": 2048}
+    config = {"temperature": 0}
     body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": config}
     if search:
         body["tools"] = [{"google_search": {}}]  # grounding with Google Search (JSON mode can't be combined with it)
     else:
         config["responseMimeType"] = "application/json"
-    # Key goes in a header (not the URL) so it never appears in logs or error messages.
-    r = _requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent", timeout=40 if search else 25,
-                       headers={"x-goog-api-key": GEMINI_API_KEY, "content-type": "application/json"}, json=body)
-    data = r.json()
-    if r.status_code != 200:
-        raise ValueError((data.get("error") or {}).get("message", f"HTTP {r.status_code}"))
+    data = _gemini_post(body, timeout=20 if search else 15)
     block = (data.get("promptFeedback") or {}).get("blockReason")
     if block:
         raise ValueError(f"blocked by Gemini safety filter ({block})")
