@@ -555,6 +555,34 @@ otp_call = c.post("/api/phishguard/scan", json={"mode": "call", "sender": "+9230
 check("…the same words on a phone call stay a phone scam", otp_call.get("category") == "Phone scam (vishing)", otp_call.get("category"))
 print(f"\n{len(fails)} failures (after Pakistan/Urdu checks)", fails)
 
+# ── immigration / visa fee scams (fake consultancies, overseas-job agents) ──
+def scan(mode, body, sender="", subject="", **kw):
+    j = c.post("/api/phishguard/scan", json={"mode": mode, "sender": sender, "subject": subject, "body": body, **kw}).json
+    j["ftext"] = [f["text"] if isinstance(f, dict) else f for f in j.get("flags", [])]
+    return j
+fee_mail = next(e for e in m.PG_EXAMPLES if e["key"] == "imm-fee")
+r = scan("email", fee_mail["body"], fee_mail["sender"], fee_mail["subject"])
+check("immigration 'assessment fee' email → likely scam, own category", r.get("score", 0) >= 55 and r.get("category") == "Immigration / visa fee scam", (r.get("score"), r.get("category")))
+check("…flags the fee and the false 'government corporation' claim", any("assessment" in f for f in r["ftext"]) and any("government" in f for f in r["ftext"]), r["ftext"])
+check("…'Visa and MasterCard' isn't read as a visa", "card" in m._IMM_RX["card_visa"].sub(" card ", "paid by visa and mastercard"))
+call = scan("call", "A woman called about my Canada immigration application. She directly asked how I was funded. I said I need to talk with my family "
+            "and asked for a week. She said she can only give me till Monday. Then she emailed the fees: 950 CAD assessment, pay by card.")
+check("call notes: 'how are you funded' + 'only till Monday' + fee → likely scam", call.get("score", 0) >= 55 and call.get("category") == "Immigration / visa fee scam", (call.get("score"), call["ftext"]))
+ur_agent = sms("+923001112233", "کینیڈا ورک ویزا دستیاب ہے، بغیر آئیلٹس، سو فیصد گارنٹی۔ پروسیسنگ فیس ڈیڑھ لاکھ ایڈوانس جمع کروائیں", country="PK")
+check("Urdu 'no IELTS, 100% guarantee, advance fee' agent → likely scam", ur_agent.get("score", 0) >= 55 and ur_agent.get("category") == "Immigration / visa fee scam", (ur_agent.get("score"), ur_agent["ftext"]))
+ircc = scan("email", "Dear Jordan Lee, Your application for permanent residence is in process. Please pay the right of permanent residence fee of $575 online "
+            "through your IRCC secure account within 30 days.", "IRCC <IRCC.DoNotReply-NePasRepondre.IRCC@cic.gc.ca>", "Request to pay fees")
+check("a real IRCC fee request stays safe (and 'secure account' isn't a 'safe account' scam)", ircc.get("score", 100) < 30, (ircc.get("score"), ircc["ftext"]))
+rcic = scan("email", "Hi Jordan, please find our retainer agreement attached. Our professional fee is $3,000 CAD, payable in two installments by credit card. "
+            "I am a Regulated Canadian Immigration Consultant, CICC licence number R512345.", "Priya Shah RCIC <priya@shahimmigration.example>", "Retainer agreement")
+check("a licensed consultant who gives a licence number isn't flagged", rcic.get("score", 100) < 30, (rcic.get("score"), rcic["ftext"]))
+card = sms("VISA", "Your Visa card ending 4421 was charged $54.20 at COSTCO.")
+check("a Visa card text isn't treated as a visa", not any("immigration" in f.lower() or "visa without" in f.lower() for f in card["ftext"]), card["ftext"])
+check("Canada and Pakistan list where to report immigration scams",
+      any("CICC" in i["name"] for i in rep["CA"]["items"]) and any("BEOE" in i["name"] for i in rep["PK"]["items"])
+      and "immigration" in cfg["report_topics"].get("Immigration / visa fee scam", []))
+print(f"\n{len(fails)} failures (after immigration checks)", fails)
+
 # ── documents with pictures and charts: scanned PDFs, screenshots pasted into PDFs / Word, chart clutter ──
 import io as _io, zipfile as _zipfile, shutil as _sh2
 check("chart axis rows are clutter", all(m.chart_noise(x) for x in ["0 20 40 60 80 100", "Jan Feb Mar Apr May Jun", "Q1 Q2 Q3 Q4", "$0 $5k $10k $15k", "10% 20% 30%"]))

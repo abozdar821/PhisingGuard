@@ -1430,6 +1430,97 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
     return sc, fl, kinds
 
 
+# Immigration and visa "consultancies" that charge upfront fees (assessment-fee emails and sales calls that ask
+# how you're funded), and fake overseas-job agents. Plain data so the phone app runs the same rules: a rule scores
+# when every "all" pattern matches and its "unless" pattern doesn't. "Visa" the card brand is removed first ("card_visa").
+IMM_FEE = (r"\b(?:assessment|evaluation|eligibility|application|processing|registration|consultation|file[- ]opening|service|retainer|visa|admin\w*) (?:fees?|charges?|payment)\b"
+           r"|\bfees? (?:for|of) (?:the |your |our )?(?:assessment|evaluation|application|processing|file|visa)\b"
+           r"|\b(?:advance|upfront|up-front) (?:fees?|payment|amount)\b|\bfile (?:charges|fees?)\b"
+           r"|\d[\d,.]*\s?(?:cad\$?|c\$|usd|\$|pkr|rs|£|€)?\s*(?:for (?:the |an? )?)?(?:assessment|evaluation|file opening)\b")
+IMM_HOW = (r"\b(?:first|second|1st|2nd) (?:installment|instalment|payment)\b|\binstall?ments?\b|\bcredit card\b"
+           r"|\bdebit card\b|\bcard (?:or|and) card\b|\bcard\b[^.\n]{0,20}\bpayment\b"
+           r"|\bto (?:begin|start|open|proceed|initiate)\b|\bonce (?:you|the) (?:pay|paid|payment|complete the payment)"
+           r"|\bafter (?:the |your )?payment\b|\bby (?:debit |credit )?card\b|\badvance\b"
+           r"|(?:\$|\bcad|c\$|\busd|\baud|\bnzd|\bgbp|\beur|€|£|\brs\.?|\bpkr|\binr)\s?\d"
+           r"|\d[\d,.]*\s?(?:cad|c\$|usd|aud|nzd|gbp|eur|euros?|pkr|rs|lakhs?)\b")
+IMM_LICENCE = r"\br\d{6}\b|\b(?:licen[cs]e|membership|cicc|rcic) (?:no\.?|number|#)\s*:?\s*r?\d{5,6}\b"
+IMMIGRATION = {
+    "card_visa": (r"\bvisa\s*(?:/|,|or|and|&)\s*master\s?card\b|\bmaster\s?card\s*(?:/|,|or|and|&)\s*visa\b"
+                  r"|\bvisa (?:card|debit|credit|gift card|prepaid)\b|\b(?:your|my|the) visa (?:ending|card)\b"),
+    "topic": (r"\b(?:immigra\w*|emigra\w*|visas?|work permits?|study permits?|permanent residen\w*|express entry|lmia|citizenship|green card|residency|relocat\w*|(?:come|coming|moving) to canada|new life in canada|move to (?:canada|australia|the uk|the usa|the us|europe|germany|new zealand)|overseas (?:job|employment)|jobs? (?:in|abroad) (?:canada|australia|europe|the uk|dubai|saudi\w*|qatar|germany|poland|romania|italy|abroad)|skilled migration|migration (?:agents?|program\w*|visas?)|subclass \d{3}|migrat(?:e|ing) to (?:canada|australia|new zealand|the uk|the usa|europe|germany)|rcics?|ircc|uscis)\b"),
+    "rules": [
+        {"points": 30, "text": "Asks you to pay an \"assessment\" or application fee to a private company before anything is done",
+         "all": [IMM_FEE, IMM_HOW], "unless": IMM_LICENCE},
+        {"points": 10, "text": "Asks for a fee up front for immigration help",
+         "all": [IMM_FEE, IMM_HOW, IMM_LICENCE]},
+        {"points": 10, "text": "Promises a private \"online immigration system\" once you pay; real applications are made on the government's own website",
+         "all": [r"\b(?:access|log ?in|login)\b[^.\n]{0,30}\b(?:online )?(?:immigration )?(?:system|portal|platform)\b[^.\n]{0,40}\(?\b(?:ois|ips|iss)\b\)?"
+                r"|\bonline immigration (?:system|portal|platform)\b"]},
+        {"points": 30, "text": "Claims to be part of, or approved by, the government; private immigration firms are not",
+         "all": [r"\b(?:official )?government (?:federal )?(?:corporations?|agenc(?:y|ies)|bod(?:y|ies)|partners?|contractors?)\b[^.\n]{0,20}\b(?:like|such as) (?:us|ours)\b"
+                r"|\b(?:like|such as) ours\b[^.\n]{0,40}\bgovernment\b"
+                r"|\bgovernment[- ](?:approved|authori[sz]ed|accredited|licensed|certified|appointed) (?:agent|agency|consultant|partner|company|firm|representative)s?\b"
+                r"|\b(?:approved|authori[sz]ed|appointed|accredited|licensed) by (?:the )?(?:canadian |australian |uk |us |federal )?(?:government|ircc|immigration canada|home office|uscis|embassy|high commission)\b"
+                r"|\b(?:authori[sz]ed|approved|official|accredited|licensed|registered) (?:agents?|agenc(?:y|ies)|partners?|representatives?) (?:of|for|with) (?:the )?(?:canadian |australian |uk |us |federal )?(?:government|ircc|immigration canada|home office|uscis|embassy|high commission)\b"
+                r"|\b(?:official )?partners? of (?:the )?(?:canadian |australian |federal )?(?:government|ircc|embassy)\b"
+                r"|\b(?:in )?partner(?:ship|ed)? with (?:the )?(?:government|ircc|embassy)\b"
+                r"|\bon behalf of (?:the )?(?:canadian |australian )?(?:government|ircc|embassy)\b"]},
+        {"points": 20, "text": "Promises approval or a visa without the usual tests; no one but the government can decide that",
+         "all": [r"\b(?:guarantee[ds]?|100\s?%)\b[^.\n]{0,25}\b(?:visa|approval|approved|success|acceptance|work permit|pr)\b"
+                r"|\b(?:visa|approval|success|work permit|pr|job)\b[^.\n]{0,15}\bguaranteed\b"
+                r"|\bsuccess rate\b[^.\n]{0,40}\b(?:unmatched|highest|\d{2,3}\s?%)"
+                r"|\breceive (?:the |your )?(?:confirmation|approval) from the (?:canadian |australian |uk |us )?government\b"
+                r"|\b(?:without|no|bina) ielts\b|\bielts (?:is )?not (?:required|needed)\b|\b(?:no|without (?:an? )?)interview\b"]},
+        {"points": 25, "text": "Offers a company-registry lookup as proof; that only shows a company exists, not that it's licensed to give immigration advice",
+         "all": [r"\b(?:business|corporate|corporation|company|companies) regist(?:ry|ries|er|ers)\b|\bfind a corporation\b"
+                r"|\bcorporations canada\b|\bcompanies house\b|\bsecp\b|\bregistered business in\b|\bwe are who we say we are\b",
+                r"\b(?:search|check|confirm|verify|look (?:us )?up|see)\b"]},
+        {"points": 10, "text": "Mentions licensed consultants or lawyers but gives no name and licence number you could check",
+         "all": [r"\brcics?\b|\bregulated canadian immigration consultants?\b|\blicensed (?:immigration )?consultants?\b"
+                r"|\bregistered (?:immigration )?(?:lawyers|consultants)\b"], "unless": IMM_LICENCE},
+        {"points": 15, "text": "Asks for your friends' and family's names and phone numbers, so they can be targeted next",
+         "all": [r"\b(?:friends?|family members?|relatives?|colleagues?)\b[^.\n]{0,80}\b(?:interested|would like|want)\b[^.\n]{0,60}\b(?:canada|immigra\w*|visa|abroad|move)\b",
+                r"\b(?:provide|send|share|give)\b[^.\n]{0,20}\b(?:us )?(?:with )?(?:their|the) (?:information|details|contacts?|numbers?|emails?)\b"
+                r"|\bfirst name\b[^.\n]{0,40}\bphone number\b"]},
+        {"points": 20, "text": "Asks how much money you have or who will pay before anything about your eligibility, a sales check, not an assessment",
+         "all": [r"\b(?:how (?:are|were|was|will|would) (?:you|i|we) (?:be )?(?:funded|financ\w*|paying|supported)|how (?:you|i) (?:are|am|was|were) (?:funded|financ\w*|paying|supported)|how much (?:money|savings|funds?|cash)\b|how much (?:i|you|we|they) (?:can|could) (?:pay|afford)\b|(?:who|what) (?:is |was )?(?:funding|financing|supporting|sponsoring) (?:you|me|your|my)|(?:asked|asking|asks)\b[^.\n]{0,25}\b(?:my|your|about (?:my|your)) (?:funding|finances|financial (?:situation|status)|savings|budget|income|bank balance))"]},
+        {"points": 15, "text": "Made-up deadline to stop you checking or asking your family first",
+         "all": [r"\b(?:only|just) (?:give|have|hold|keep)\b[^.\n]{0,20}\b(?:until|till|by|for)\b"
+                r"|\b(?:until|till|by) (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|end of (?:the )?(?:day|week))\b[^.\n]{0,40}\b(?:only|deadline|or|last|close|lose|spot|place|offer)\b"
+                r"|\b(?:deadline|last chance|limited (?:spots?|places?|seats?|slots?|time)|spots? (?:are )?(?:filling|limited)|(?:program|programme|quota|draw|intake|window|offer)\b[^.\n]{0,15}\b(?:closes|ends|expires))\b"
+                r"|\b(?:seats?|spots?|places?|slots?|vacanc(?:y|ies))\b[^.\n]{0,25}\b(?:are |is )?(?:limited|filling)\b"
+                r"|\bwithin \d+ (?:hours?|days?)\b[^.\n]{0,30}\b(?:secure|keep|hold|reserve)\b"
+                r"|\bsecure your (?:place|spot|seat)\b"
+                r"|\b(?:application|file|offer|spot|place)\b[^.\n]{0,20}\b(?:will be|is being|gets?) (?:closed|cancell?ed|given to someone)"]},
+        {"points": 15, "text": "Says you are \"pre-approved\" or \"pre-selected\"; only the government approves immigration applications",
+         "all": [r"\bpre-?(?:approved|selected|qualified)\b"]},
+        {"points": 25, "text": "Says you won a visa or immigration lottery; Canada has no such lottery, and the US one never asks winners to pay by phone",
+         "all": [r"\b(?:won|win|winner|selected)\b[^.\n]{0,40}\b(?:visa|immigration|green card|dv|canada) lottery\b"
+                r"|\b(?:visa|immigration|green card|dv|canada) lottery\b[^.\n]{0,40}\b(?:won|win|winner|selected)\b"]},
+        {"points": 10, "text": "Wants a passport scan before you know who they are",
+         "all": [r"\b(?:passport|cv|resume|résumé)\b[^.\n]{0,30}\b(?:photo|scan|copy|picture)\b"
+                r"|\bsend (?:us |me )?(?:a )?(?:photo|scan|copy) of your passport\b",
+                r"\b(?:first call|call|advisor|agent|before|prepare|ready)\b"]},
+        {"points": 35, "text": "Sells an LMIA or job offer for a fee, which is illegal",
+         "all": [r"\blmia\b[^.\n]{0,40}\b(?:for sale|buy|purchase|price|cost|fee|pay)\b"
+                r"|\b(?:buy|sell\w*|purchase) (?:an? )?(?:lmia|job offer|work permit)\b"]},
+    ]}
+_IMM_RX = {"card_visa": re.compile(IMMIGRATION["card_visa"]), "topic": re.compile(IMMIGRATION["topic"]),
+           "rules": [(r, [re.compile(x) for x in r["all"]], re.compile(r["unless"]) if r.get("unless") else None) for r in IMMIGRATION["rules"]]}
+
+
+def _immigration_module(text_l: str):
+    sc, fl = 0, []
+    t = _IMM_RX["card_visa"].sub(" card ", text_l)
+    if not _IMM_RX["topic"].search(t):
+        return sc, fl
+    for rule, rxs, unless in _IMM_RX["rules"]:
+        if all(rx.search(t) for rx in rxs) and not (unless and unless.search(t)):
+            sc += rule["points"]
+            fl.append((rule["points"], rule["text"]))
+    return sc, fl
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # LANGUAGES — detect the message's language and apply scam rules written in it
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1514,6 +1605,12 @@ MULTI_LEXICON = {
             f"{_LB}(?:urgente|inmediatamente|hoy mismo|de inmediato|última advertencia|ultima advertencia|24 horas){_LE}"]},
         {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": [
             f"{_LB}(?:pague|pagar|pago|tarifa|cuota|depósito|deposito|transferencia|tarjetas? de regalo|bitcoin){_LE}"]},
+        {"kind": "immigration", "points": 25, "text": "Promises a guaranteed visa, or one without IELTS or an interview", "all": [
+            f"{_LB}(?:(?<!tarjeta )visa(?!s? (?:o|y) mastercard)|visas|visado|permiso de trabajo|inmigración|inmigracion|residencia|green card|emigrar){_LE}",
+            f"{_LB}(?:garantizad[oa]s?|100 ?%|sin entrevista|aprobación asegurada|aprobacion asegurada){_LE}"]},
+        {"kind": "immigration", "points": 20, "text": "Asks for an advance or \"processing fee\" for a visa or a job abroad", "all": [
+            f"{_LB}(?:(?<!tarjeta )visa(?!s? (?:o|y) mastercard)|visas|visado|permiso de trabajo|inmigración|inmigracion|residencia|green card|emigrar){_LE}",
+            f"{_LB}(?:anticipo|por adelantado|pago adelantado){_LE}"]},
         {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": [
             f"{_LB}(?:verifique|verificar|confirme sus datos|actualice sus datos|haga clic|ingrese al enlace|enlace){_LE}"]},
         {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": [
@@ -1537,6 +1634,12 @@ MULTI_LEXICON = {
         {"kind": "aid", "points": 30, "text": "Offers a government aid payment (BISP / Ehsaas-style)", "all": ["(?:بینظیر|بے نظیر|احساس|بی آئی ایس پی|8171|امدادی رقم)"]},
         {"kind": "urgency", "points": 10, "text": "Pressure to act immediately", "all": ["(?:فوری|فورا|ابھی|آخری موقع|24 گھنٹے)"]},
         {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": ["(?:فیس|رقم جمع|جمع کرائیں|ٹرانسفر|ایزی پیسہ|جاز کیش|بھیجیں)"]},
+        {"kind": "immigration", "points": 25, "text": "Promises a guaranteed visa, or one without IELTS or an interview", "all": [
+            "(?:ویزا|ویزہ|ورک پرمٹ|امیگریشن|بیرون ملک|باہر کے ملک|کینیڈا|آسٹریلیا|یورپ|برطانیہ|انگلینڈ|جرمنی|اٹلی|سعودی|دبئی|قطر|ملائیشیا|پولینڈ|رومانیہ)",
+            "(?:بغیر آئیلٹس|آئیلٹس کے بغیر|بغیر آئلٹس|آئلٹس کے بغیر|بغیر ielts|ielts کے بغیر|گارنٹی|سو فیصد|100 ?فیصد|100 ?%|پکا ویزا|پکا ویزہ|بغیر انٹرویو)"]},
+        {"kind": "immigration", "points": 20, "text": "Asks for an advance or \"processing fee\" for a visa or a job abroad", "all": [
+            "(?:ویزا|ویزہ|ورک پرمٹ|امیگریشن|بیرون ملک|باہر کے ملک|کینیڈا|آسٹریلیا|یورپ|برطانیہ|انگلینڈ|جرمنی|اٹلی|سعودی|دبئی|قطر|ملائیشیا|پولینڈ|رومانیہ)",
+            "(?:ایڈوانس|پروسیسنگ فیس|پراسیسنگ فیس|فائل فیس|فائل چارجز)"]},
         {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": ["(?:تصدیق کریں|تصدیق کروائیں|تصدیق کرائیں|لنک|کلک|تفصیلات)"]},
         {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": ["(?:گرفتار|پولیس|ایف آئی اے|مقدمہ|قانونی کارروائی|وارنٹ)"]},
         {"kind": "newnumber", "points": 20, "text": "Says they have a new number or lost their phone", "all": ["(?:نیا نمبر|میرا نمبر بدل|فون گم|موبائل گم)"]},
@@ -1570,6 +1673,10 @@ MULTI_LEXICON = {
         {"kind": "aid", "points": 25, "text": "Offers a government benefit or subsidy", "all": ["(?:सरकारी योजना|पीएम किसान|सब्सिडी|रिफंड|सहायता राशि)"]},
         {"kind": "urgency", "points": 10, "text": "Pressure to act immediately", "all": ["(?:तुरंत|अभी|अंतिम चेतावनी|24 घंटे)"]},
         {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": ["(?:शुल्क|भुगतान|फीस|ट्रांसफर|यूपीआई|upi|गिफ्ट कार्ड)"]},
+        {"kind": "immigration", "points": 25, "text": "Promises a guaranteed visa, or one without IELTS or an interview", "all": [
+            "(?:वीज़ा|वीजा|वर्क परमिट|इमिग्रेशन|विदेश|कनाडा|ऑस्ट्रेलिया|यूरोप|दुबई|ब्रिटेन|जर्मनी)", "(?:बिना आईईएलटीएस|बिना ielts|गारंटी|100 ?%|100 ?प्रतिशत|पक्का वीज़ा|पक्का वीजा|बिना इंटरव्यू)"]},
+        {"kind": "immigration", "points": 20, "text": "Asks for an advance or \"processing fee\" for a visa or a job abroad", "all": [
+            "(?:वीज़ा|वीजा|वर्क परमिट|इमिग्रेशन|विदेश|कनाडा|ऑस्ट्रेलिया|यूरोप|दुबई|ब्रिटेन|जर्मनी)", "(?:एडवांस|अग्रिम|प्रोसेसिंग फीस|प्रोसेसिंग शुल्क|फ़ाइल चार्ज|फाइल चार्ज)"]},
         {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": ["(?:सत्यापित|केवाईसी|kyc|लिंक|क्लिक)"]},
         {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": ["(?:गिरफ्तार|गिरफ़्तार|पुलिस|सीबीआई|कानूनी कार्रवाई|वारंट|डिजिटल अरेस्ट)"]},
         {"kind": "newnumber", "points": 20, "text": "Says they have a new number or lost their phone", "all": ["(?:नया नंबर|मेरा नंबर बदल|फोन खो|फ़ोन खो|मोबाइल खो)"]},
@@ -1607,6 +1714,12 @@ MULTI_LEXICON = {
         {"kind": "urgency", "points": 10, "text": "Pressure to act immediately", "all": [f"{_LB}(?:foran|fori|jaldi|aakhri|akhri mauqa){_LE}"]},
         {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": [
             f"{_LB}(?:fees|fee|raqam|jama|easypaisa|easy paisa|jazzcash|jazz cash|upi|paise){_LE}"]},
+        {"kind": "immigration", "points": 25, "text": "Promises a guaranteed visa, or one without IELTS or an interview", "all": [
+            f"{_LB}(?:visa|work permit|immigration|bahar|bahir|abroad|canada|kanada|europe|australia|saudia|dubai|italy|poland|romania|germany){_LE}",
+            f"{_LB}(?:bina ielts|baghair ielts|bager ielts|ielts ke baghair|ielts ke bina|without ielts|no ielts|guarantee|guaranteed|garanti|100 ?%|sau fisad|pakka visa|bina interview){_LE}"]},
+        {"kind": "immigration", "points": 20, "text": "Asks for an advance or \"processing fee\" for a visa or a job abroad", "all": [
+            f"{_LB}(?:visa|work permit|immigration|bahar|bahir|abroad|canada|kanada|europe|australia|saudia|dubai|italy|poland|romania|germany){_LE}",
+            f"{_LB}(?:advance|processing fees?|file fees?|file charges|visa charges){_LE}"]},
         {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": [
             f"{_LB}(?:tasdeeq|tasdiq|verify|kyc|link par|link pe){_LE}"]},
         {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": [
@@ -1647,6 +1760,12 @@ MULTI_LEXICON = {
             f"{_LB}(?:dringend|sofort|umgehend|unverzüglich|letzte mahnung|letzte warnung|innerhalb von \\d+ (?:stunden|tagen)|heute noch|bis spätestens|nur noch mit|ab dem \\d{{1,2}}\\.\\d{{1,2}}\\.){_LE}"]},
         {"kind": "payment", "points": 25, "text": "Asks you to pay a fee or send money", "all": [
             f"{_LB}(?:bezahlen|zahlen|überweisung|überweisen|überweis|gebühr|gutschein|gutscheinkarte|paysafecard|bitcoin|echtzeitüberweisung|vorkasse|per paypal|einzahlen|kartendaten|kontodaten)[{LATIN_LETTERS}]*"]},
+        {"kind": "immigration", "points": 25, "text": "Promises a guaranteed visa, or one without IELTS or an interview", "all": [
+            f"{_LB}(?:visum|visa(?!\\s*(?:oder|und|/)\\s*master)|aufenthaltstitel|arbeitserlaubnis|einwanderung|auswander|green card|blaue karte|chancenkarte)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:garantiert|100 ?%|ohne sprachnachweis|ohne deutschkenntnisse|ohne interview|sichere zusage){_LE}"]},
+        {"kind": "immigration", "points": 20, "text": "Asks for an advance or \"processing fee\" for a visa or a job abroad", "all": [
+            f"{_LB}(?:visum|visa(?!\\s*(?:oder|und|/)\\s*master)|aufenthaltstitel|arbeitserlaubnis|einwanderung|auswander|green card|blaue karte|chancenkarte)[{LATIN_LETTERS}]*",
+            f"{_LB}(?:vorauszahlung|vorab|anzahlung|vorkasse)[{LATIN_LETTERS}]*"]},
         {"kind": "verify", "neg": True, "points": 15, "text": "Asks you to verify your details or click a link", "all": [
             f"{_LB}(?:bestätigen sie|verifizieren|verifizierung|daten aktualisieren|aktualisieren sie|klicken sie|klick auf|hier klicken|auf den link|über den link|link öffnen|legitimieren|formular aus|füllen sie das formular|formular ausfüllen|zahlungsdaten|führen sie|jetzt durchführen|jetzt aktualisieren|jetzt bestätigen|jetzt aktivieren){_LE}"]},
         {"kind": "threat", "points": 35, "text": "Threatens arrest, police or legal action", "all": [
@@ -1797,7 +1916,9 @@ def _vishing_module(text_l: str):
         add(35, "Asks for payment by gift card, crypto, wire or a payment app", "payment")
     if re.search(r"\b(?:anydesk|teamviewer|ultraviewer|quick ?assist|logmein|remote (?:access|desktop|support)|screen ?share|install (?:an?|this|the) (?:app|program|software))\b", t):
         add(40, "Wants remote access to your computer or phone", "remote")
-    if re.search(r"\b(?:safe|secure|protected|new) (?:account|wallet)\b|\b(?:move|transfer|protect) (?:your|the) (?:money|funds|savings)\b", t):
+    if re.search(r"\b(?:move|transfer|protect) (?:your|the|all (?:your|the)) (?:money|funds|savings)\b", t) \
+            or (re.search(r"\b(?:safe|secure|protected|new) (?:bank )?(?:account|wallet)\b", t)
+                and re.search(r"\b(?:move|transfer|send|deposit|wire|withdraw)\b[^.!?\n]{0,40}\b(?:money|funds|savings|balance|cash|it all|everything)\b", t)):
         add(45, "Tells you to move money to a \"safe\" account", "safe_account")
     if re.search(r"\b(?:grandma|grandpa|grandmother|grandfather|it'?s me|your (?:grand)?(?:son|daughter))\b", t) \
             and re.search(r"\b(?:jail|bail|arrested|accident|hospital|lawyer|attorney)\b", t) and re.search(r"\b(?:money|bail|send|wire|cash|pay)\b", t):
@@ -1983,6 +2104,11 @@ PG_ACTIONS = {
                                      "If you entered a password, change it now and turn on 2-factor sign-in.",
                                      "Report phishing to the brand and to reportphishing@apwg.org."],
 }
+PG_ACTIONS["Immigration / visa fee scam"] = [
+    "Don't pay an \"assessment\", file-opening or visa fee to a company that contacted you, and don't give card details on the phone.",
+    "Check your eligibility for free on the government's own immigration website (for Canada: canada.ca) and pay government fees only there.",
+    "Before paying any consultant, look up their name and licence number on the official register (for Canada: college-ic.ca; for jobs from Pakistan: a BEOE-licensed promoter).",
+    "Report it (see where to report below), and warn family members who may be asked to pay."]
 PG_ACTIONS["Spoofed email (failed authentication)"] = [
     "Don't click links, open attachments or reply — the sender's address is forged.",
     "Go to the real company's site or app by typing the address yourself.",
@@ -2061,7 +2187,9 @@ PG_REPORTING = {
         {"name": "PTA complaint (scam calls and SMS)", "url": "https://complaint.pta.gov.pk/RegisterComplaint", "phone": "0800-55055",
          "topics": ["sms", "call"], "what": "Report the number to your mobile company first; PTA can block the number and phone"},
         {"name": "State Bank of Pakistan", "url": "", "phone": "111-727-273", "email": "cpd.helpdesk@sbp.org.pk", "topics": ["bank"],
-         "what": "Bank, card or mobile-wallet fraud: call your bank first, then complain to SBP"}]},
+         "what": "Bank, card or mobile-wallet fraud: call your bank first, then complain to SBP"},
+        {"name": "Bureau of Emigration & Overseas Employment (BEOE)", "url": "https://beoe.gov.pk/", "topics": ["immigration"],
+         "what": "Check that an overseas job agent is a licensed Overseas Employment Promoter before you pay anything"}]},
     "IN": {"name": "India", "items": [
         {"name": "National Cyber Crime Reporting Portal", "url": "https://cybercrime.gov.in/", "phone": "1930", "topics": ["all"],
          "what": "Report cyber fraud; call 1930 right away if you lost money"},
@@ -2076,7 +2204,11 @@ PG_REPORTING = {
     "CA": {"name": "Canada", "items": [
         {"name": "Canadian Anti-Fraud Centre", "url": "https://antifraudcentre-centreantifraude.ca/report-signalez-eng.htm", "topics": ["all"],
          "what": "Report fraud and scams; also tell your local police if you lost money"},
-        {"name": "Forward the text to 7726 (SPAM)", "url": "", "topics": ["sms"], "what": "Tells your mobile carrier so it can block the sender"}]},
+        {"name": "Forward the text to 7726 (SPAM)", "url": "", "topics": ["sms"], "what": "Tells your mobile carrier so it can block the sender"},
+        {"name": "CICC: complain about an immigration consultant", "url": "https://college-ic.ca/protecting-the-public/complaints-process/make-a-complaint?l=en-CA",
+         "topics": ["immigration"], "what": "Report unlicensed or dishonest immigration consultants; you can also check a consultant on the CICC public register"},
+        {"name": "IRCC: how to report immigration fraud", "url": "https://www.canada.ca/en/immigration-refugees-citizenship/services/protect-fraud/report-fraud.html",
+         "topics": ["immigration"], "what": "The Canadian government's guide to reporting visa and immigration scams, including from outside Canada"}]},
     "AU": {"name": "Australia", "items": [
         {"name": "Scamwatch (National Anti-Scam Centre)", "url": "https://www.scamwatch.gov.au/", "topics": ["all"],
          "what": "Report scams so they can be disrupted and others warned"},
@@ -2108,6 +2240,7 @@ PG_REPORT_TOPICS = {
     "Suspicious link": ["online"], "Known dangerous link": ["online"], "Social media account takeover": ["online"],
     "Toll / delivery fee scam": ["online", "bank"], "Prize or benefit scam": ["bank"], "Government impersonation": ["bank"],
     "Utility shut-off scam": ["bank"], "Health / miracle-cure spam": ["online"],
+    "Immigration / visa fee scam": ["immigration", "bank"],
 }
 
 PG_DEFAULT_ACTIONS = {"call": ["Hang up and call the organisation back on a number you look up yourself.",
@@ -2405,6 +2538,7 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
     take("Link analysis", (link_sc, link_fl))
     lure_sc, lure_fl, kinds = _lure_module(text_l, links, phones)
     take("Lure detector", (lure_sc, lure_fl))
+    imm_sc = take("Immigration-scam detector", _immigration_module(text_l))
     vish_sc, vish_fl, vkinds = _vishing_module(text_l)
     take("Phone-scam detector", (vish_sc, vish_fl))
     hdr_sc = take("Email headers", _header_module(sn, headers))
@@ -2431,6 +2565,10 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Known dangerous link"
     elif imp_sc >= 45:
         category = "Fake recruiter (employer impersonation)"
+    elif imm_sc >= 40 and imm_sc >= vish_sc:
+        category = "Immigration / visa fee scam"
+    elif ml_sc >= 40 and "immigration" in mkinds:
+        category = "Immigration / visa fee scam"
     elif vish_sc >= 40 and (mode == "call" or (vish_sc >= lure_sc and vkinds != {"code"})):
         category = "Phone scam (vishing)"
     elif vish_sc >= 40 and vish_sc >= lure_sc and vkinds == {"code"}:
@@ -2572,6 +2710,9 @@ PG_EXAMPLES = [
      "body": "प्रिय ग्राहक, आपका खाता आज बंद कर दिया जाएगा। तुरंत केवाईसी अपडेट करने के लिए इस लिंक पर क्लिक करें http://sbi-kyc-update.in"},
     {"key": "de-mama", "title": "German: \"Hi Mum\" new number", "tag": "PHISH", "mode": "sms", "sender": "+49 1521 2345678", "subject": "",
      "body": "Hallo Mama, das ist meine neue Nummer, mein Handy ist kaputt. Kannst du mir bitte heute noch eine Rechnung überweisen? Ich zahle es dir morgen zurück."},
+    {"key": "imm-fee", "title": "Immigration \"assessment fee\" email", "tag": "PHISH", "mode": "email",
+     "sender": "Dana Fields <dana.fields@mail.mapleroute.example>", "subject": "Maple Route, About the process",
+     "body": "Good Day Jordan Lee,\nTo immigrate to Canada, here are the steps you need to follow:\n1. Pay your application fees: Pay the required fees to start the assessment on your visa application. Payments are accepted only by debit or credit cards (Visa and MasterCard).\nPersonalized Immigration Assessment - 950 CAD$\nMinimal first Installment - 300 CAD$\nSecond Installment - 650 CAD$\n2. You will gain access to the Online Immigration System (OIS) to track your application.\n9. Receive confirmation from the Canadian Government.\nIt is recommended to consult official government federal corporations like ours for accurate and up-to-date information.\nDana Fields, Immigration Agent"},
     {"key": "roman-urdu-call", "title": "Roman Urdu: bank caller", "tag": "PHISH", "mode": "call", "sender": "+92 300 1234567", "subject": "",
      "body": "Assalam o alaikum, main bank se baat kar raha hoon. Aap ka account block ho gaya hai, foran apne mobile par aaya hua code bata dein."},
 ]

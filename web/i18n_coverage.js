@@ -25,7 +25,7 @@ Object.values(D.PG_REPORTING || {}).forEach(c => { texts.add(c.name); c.items.fo
 // proper names that are written the same way in that language
 const NAMES = ["FTC: ReportFraud.ftc.gov", "ReportCyber (cyber.gov.au)"];
 const SAME = {es: new Set([...NAMES, "India", "Australia", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group"]), ur: new Set(NAMES), hi: new Set(NAMES),
-              de: new Set([...NAMES, "Pakistan", "Hindi", "Urdu", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group", "FTC: ReportFraud.ftc.gov", "FBI Internet Crime Complaint Center (IC3)", "State Bank of Pakistan", "Canadian Anti-Fraud Centre", "Scamwatch (National Anti-Scam Centre)", "ReportCyber (cyber.gov.au)", "BISP"])};
+              de: new Set([...NAMES, "Pakistan", "Hindi", "Urdu", "Sanchar Saathi: Chakshu", "Anti-Phishing Working Group", "FTC: ReportFraud.ftc.gov", "FBI Internet Crime Complaint Center (IC3)", "State Bank of Pakistan", "Canadian Anti-Fraud Centre", "Scamwatch (National Anti-Scam Centre)", "ReportCyber (cyber.gov.au)", "BISP", "Bureau of Emigration & Overseas Employment (BEOE)"])};
 let bad = 0;
 for (const code of ["es", "ur", "hi", "de"]) {
   I.set(code);

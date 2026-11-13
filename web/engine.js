@@ -528,6 +528,17 @@ function createEngine(D, env) {
     if (links.length && /did you (?:attempt|make|authori[sz]e)/.test(t) && /reply (?:yes|no|y|n)\b/.test(t)) add(20, "Fake fraud alert: YES/NO reply plus a verification link", "fraud_alert");
     return { M, kinds };
   }
+  // immigration / visa fee scams: data-driven, same rules as phishguard_soc.IMMIGRATION
+  const IMM = D.IMMIGRATION ? { cardVisa: new RegExp(D.IMMIGRATION.card_visa, "g"), topic: new RegExp(D.IMMIGRATION.topic),
+    rules: D.IMMIGRATION.rules.map(r => [r, r.all.map(x => new RegExp(x)), r.unless ? new RegExp(r.unless) : null]) } : null;
+  function immigrationModule(text) {
+    const M = mod();
+    if (!IMM) return M;
+    const t = text.replace(IMM.cardVisa, " card ");
+    if (!IMM.topic.test(t)) return M;
+    for (const [r, rxs, unless] of IMM.rules) if (rxs.every(rx => rx.test(t)) && !(unless && unless.test(t))) M.add(r.points, r.text);
+    return M;
+  }
   const NEG = /\b(?:never|not|don'?t|won'?t|do not|will not|cannot|can'?t)\b[^.!?\n]{0,50}/g;
   function vishingModule(text) {
     const M = mod(), kinds = new Set(), t = text.replace(NEG, " "), add = (p, x, k) => { M.add(p, x); kinds.add(k); };
@@ -546,7 +557,9 @@ function createEngine(D, env) {
       add(35, "Asks for payment by gift card, crypto, wire or a payment app", "payment");
     if (/\b(?:anydesk|teamviewer|ultraviewer|quick ?assist|logmein|remote (?:access|desktop|support)|screen ?share|install (?:an?|this|the) (?:app|program|software))\b/.test(t))
       add(40, "Wants remote access to your computer or phone", "remote");
-    if (/\b(?:safe|secure|protected|new) (?:account|wallet)\b|\b(?:move|transfer|protect) (?:your|the) (?:money|funds|savings)\b/.test(t))
+    if (/\b(?:move|transfer|protect) (?:your|the|all (?:your|the)) (?:money|funds|savings)\b/.test(t)
+        || (/\b(?:safe|secure|protected|new) (?:bank )?(?:account|wallet)\b/.test(t)
+            && /\b(?:move|transfer|send|deposit|wire|withdraw)\b[^.!?\n]{0,40}\b(?:money|funds|savings|balance|cash|it all|everything)\b/.test(t)))
       add(45, "Tells you to move money to a \"safe\" account", "safe_account");
     if (/\b(?:grandma|grandpa|grandmother|grandfather|it'?s me|your (?:grand)?(?:son|daughter))\b/.test(t)
         && /\b(?:jail|bail|arrested|accident|hospital|lawyer|attorney)\b/.test(t) && /\b(?:money|bail|send|wire|cash|pay)\b/.test(t))
@@ -800,6 +813,7 @@ function createEngine(D, env) {
     const linkSc = take("Link analysis", linkM);
     const { M: lure, kinds } = lureModule(t, links, phones);
     take("Lure detector", lure);
+    const imm = take("Immigration-scam detector", immigrationModule(t));
     const { M: vishM, kinds: vk } = vishingModule(t);
     const vish = take("Phone-scam detector", vishM), onlyCode = vk.size === 1 && vk.has("code");
     const hdr = take("Email headers", headerModule(sn, headers));
@@ -816,6 +830,8 @@ function createEngine(D, env) {
     let category = null;
     if (bbb || debt >= 30) category = "Debt collection fraud";
     else if (imp >= 45) category = "Fake recruiter (employer impersonation)";
+    else if (imm >= 40 && imm >= vish) category = "Immigration / visa fee scam";
+    else if (ml >= 40 && mk.has("immigration")) category = "Immigration / visa fee scam";
     else if (vish >= 40 && (mode === "call" || (vish >= lure.sc && !onlyCode))) category = "Phone scam (vishing)";
     else if (vish >= 40 && vish >= lure.sc && onlyCode) category = "Account or code (OTP) scam";
     else if (hdr >= 35 && flags.some(f => f.text.includes("DMARC"))) category = "Spoofed email (failed authentication)";
