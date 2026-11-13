@@ -1425,6 +1425,29 @@ def _lure_module(text_l: str, links: list[dict], phones: list[str]):
         if re.search(r"\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b"
                      r"|doctors? (?:hate|don'?t want you)|big pharma", text_l):
             add(10, "Borrows a famous university or TV network's name to look credible", "health")
+    # Immigration / visa "consultancies" that take fees up front (real: Canada NorthPath, Nov 2026).
+    if re.search(r"\b(?:immigrat\w+|visa (?:application|sponsorship|lottery|processing|assessment|approval)|(?:work|study|residence) permit|"
+                 r"permanent residen\w+|green card|express entry|migrate to|move to (?:canada|australia|the uk|the usa?|germany|new zealand))\b", text_l):
+        if re.search(r"\bpay (?:your |the |our )?(?:application |assessment |processing |visa |required |registration |consultation )*fees?\b|"
+                     r"\b(?:first|initial|second|minimal|minimum) inst[a]?l?lment\b|"
+                     r"\b(?:assessment|evaluation|processing fee|registration fee|file[- ]opening|consultation fee)\b[^.\n]{0,40}\d[\d,.]*\s?(?:cad|usd|aud|gbp|eur|pkr|inr)\b|"
+                     r"\b(?:assessment|evaluation|processing fee|registration fee|file[- ]opening|consultation fee)\b[^.\n]{0,40}(?:[$£€₹]|rs\.? ?)\d", text_l):
+            add(20, "Asks you to pay a fee up front to start an immigration or visa 'assessment'", "immig")
+        if re.search(r"\b(?:official|government|federal)\b[^.\n]{0,60}\b(?:like ours|such as ours|like us)\b|\bgovernment federal corporations?\b|"
+                     r"\bgovernment[- ](?:approved|authori[sz]ed|accredited|appointed) (?:immigration |visa )?(?:agency|agent|consultancy|company|firm|partner)\b|"
+                     r"\bofficial (?:immigration|visa) (?:partner|agent|agency|representative) of\b", text_l):
+            add(30, "Presents a private company as an official or government body", "immig")
+        if re.search(r"\bguarantee[ds]? (?:a |your |the )?(?:visa|approval|job offer|job|pr\b|permanent residen\w+|work permit|green card)|"
+                     r"\b(?:visa|approval|job|work permit) (?:is |are )?(?:100 ?% )?guaranteed\b|\b100 ?% (?:visa|approval|success)\b|\b(?:no|without) ielts\b", text_l):
+            add(20, "Guarantees a visa, job or approval. Nobody can promise an immigration decision", "immig")
+        if re.search(r"\bonline immigration system\b|\b(?:track|follow) (?:the progress of )?your (?:application|file|case) (?:on|in|through|via) our (?:own )?(?:portal|platform|system)\b", text_l):
+            add(10, "Uses its own 'immigration system' in place of the government's application account", "immig")
+        if re.search(r"\b(?:job|employer|college|university)\s?/\s?(?:job|college|university) search\b|\bour career advis[eo]rs?\b|"
+                     r"\bwe (?:will |can |'ll )?(?:find|arrange|secure|get) (?:you )?(?:a |an )?(?:job|employer|sponsor|job offer|admission)\b", text_l):
+            add(10, "Bundles a job or college place with the visa service", "immig")
+        if re.search(r"\blicen[sc]ed (?:rcic|immigration (?:consultant|lawyer|attorney|advis[eo]r)|migration agent)\b|\bregistered migration agent\b", text_l) \
+                and not re.search(r"\br\d{6}\b|\bmarn\b|\blicen[sc]e (?:no|number|#)|\bregistration (?:no|number|#)|\b(?:rcic|membership) ?(?:no|number|#|id)", text_l):
+            add(10, "Mentions a licensed consultant but gives no licence number you could check", "immig")
     if re.search(r"(?:earn|make|salary|income|commission|pay|paid|receive)\b[^.\n]{0,40}\$?\d[\d,]*(?:\s*(?:-|–|to)\s*\$?\d[\d,]*)?\s*(?:usd |dollars? |rs\.? |rupees )?(?:daily|a day|per day|/day|every day)"
                  r"|\b(?:paid|earn|get|receive)\s+\$?\d[\d,.]*\s*(?:usd |dollars? )?(?:per|for (?:each|every)|a) (?:like|review|rating|task|video|order|click)\b"
                  r"|\b(?:liking|rating|reviewing|subscribing to|following)\s+(?:youtube |tiktok |instagram )?(?:videos?|products?|hotels?|apps?|channels?|posts?)\b"
@@ -2032,6 +2055,11 @@ PG_ACTIONS["Health / miracle-cure spam"] = [
     "Real medical breakthroughs aren't announced in surprise emails. Ask your doctor instead.",
     "Never enter card details there. These sites often sign you up for hidden repeat charges.",
     "Mark it as spam and delete it."]
+PG_ACTIONS["Immigration / visa fee scam"] = [
+    "Don't pay or send documents. Visas are decided only by the government, and no agency can speed that up or guarantee it.",
+    "Check the rules and apply on the government's own website (Canada: canada.ca, USA: uscis.gov, UK: gov.uk, Australia: homeaffairs.gov.au).",
+    "If you want paid help, ask for the consultant's licence number and look it up yourself on the regulator's public register before paying.",
+    "If you already paid by card, call your bank and ask to dispute the charge."]
 PG_ACTIONS["Social media account takeover"] = [
     "Don't open the link or log in from it. Meta, Instagram and WhatsApp don't send appeal links or \"is this you?\" videos in DMs.",
     "Check for real warnings inside the app itself (Settings → Account Status / Support Inbox).",
@@ -2138,7 +2166,7 @@ PG_REPORT_TOPICS = {
     "Brand impersonation phishing": ["online", "phishing"], "Spoofed email (failed authentication)": ["online", "phishing"],
     "Suspicious link": ["online"], "Known dangerous link": ["online"], "Social media account takeover": ["online"],
     "Toll / delivery fee scam": ["online", "bank"], "Prize or benefit scam": ["bank"], "Government impersonation": ["bank"],
-    "Utility shut-off scam": ["bank"], "Health / miracle-cure spam": ["online"],
+    "Utility shut-off scam": ["bank"], "Health / miracle-cure spam": ["online"], "Immigration / visa fee scam": ["online", "bank"],
 }
 
 PG_DEFAULT_ACTIONS = {"call": ["Hang up and call the organisation back on a number you look up yourself.",
@@ -2508,6 +2536,8 @@ def phishguard_scan(mode: str, sender: str, subject: str, body: str, headers: di
         category = "Billing / subscription scam"
     elif "health" in kinds and lure_sc >= 25:
         category = "Health / miracle-cure spam"
+    elif "immig" in kinds and lure_sc >= 40:
+        category = "Immigration / visa fee scam"
     elif "callback" in kinds:
         category = "Callback phishing"
     elif ("toll" in kinds and lure_sc >= 40) or ("toll" in lkinds and score >= 40):

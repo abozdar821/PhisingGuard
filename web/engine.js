@@ -519,6 +519,21 @@ function createEngine(D, env) {
       if (/\b(?:harvard|stanford|mayo clinic|johns hopkins|cbs|cnn|nbc|abc|fox) (?:news|medical|research|study|scientists?|doctors?|presentation|reveals?)\b|doctors? (?:hate|don'?t want you)|big pharma/.test(t))
         add(10, "Borrows a famous university or TV network's name to look credible", "health");
     }
+    if (/\b(?:immigrat\w+|visa (?:application|sponsorship|lottery|processing|assessment|approval)|(?:work|study|residence) permit|permanent residen\w+|green card|express entry|migrate to|move to (?:canada|australia|the uk|the usa?|germany|new zealand))\b/.test(t)) {
+      if (/\bpay (?:your |the |our )?(?:application |assessment |processing |visa |required |registration |consultation )*fees?\b|\b(?:first|initial|second|minimal|minimum) inst[a]?l?lment\b|\b(?:assessment|evaluation|processing fee|registration fee|file[- ]opening|consultation fee)\b[^.\n]{0,40}\d[\d,.]*\s?(?:cad|usd|aud|gbp|eur|pkr|inr)\b|\b(?:assessment|evaluation|processing fee|registration fee|file[- ]opening|consultation fee)\b[^.\n]{0,40}(?:[$£€₹]|rs\.? ?)\d/.test(t))
+        add(20, "Asks you to pay a fee up front to start an immigration or visa 'assessment'", "immig");
+      if (/\b(?:official|government|federal)\b[^.\n]{0,60}\b(?:like ours|such as ours|like us)\b|\bgovernment federal corporations?\b|\bgovernment[- ](?:approved|authori[sz]ed|accredited|appointed) (?:immigration |visa )?(?:agency|agent|consultancy|company|firm|partner)\b|\bofficial (?:immigration|visa) (?:partner|agent|agency|representative) of\b/.test(t))
+        add(30, "Presents a private company as an official or government body", "immig");
+      if (/\bguarantee[ds]? (?:a |your |the )?(?:visa|approval|job offer|job|pr\b|permanent residen\w+|work permit|green card)|\b(?:visa|approval|job|work permit) (?:is |are )?(?:100 ?% )?guaranteed\b|\b100 ?% (?:visa|approval|success)\b|\b(?:no|without) ielts\b/.test(t))
+        add(20, "Guarantees a visa, job or approval. Nobody can promise an immigration decision", "immig");
+      if (/\bonline immigration system\b|\b(?:track|follow) (?:the progress of )?your (?:application|file|case) (?:on|in|through|via) our (?:own )?(?:portal|platform|system)\b/.test(t))
+        add(10, "Uses its own 'immigration system' in place of the government's application account", "immig");
+      if (/\b(?:job|employer|college|university)\s?\/\s?(?:job|college|university) search\b|\bour career advis[eo]rs?\b|\bwe (?:will |can |'ll )?(?:find|arrange|secure|get) (?:you )?(?:a |an )?(?:job|employer|sponsor|job offer|admission)\b/.test(t))
+        add(10, "Bundles a job or college place with the visa service", "immig");
+      if (/\blicen[sc]ed (?:rcic|immigration (?:consultant|lawyer|attorney|advis[eo]r)|migration agent)\b|\bregistered migration agent\b/.test(t)
+          && !/\br\d{6}\b|\bmarn\b|\blicen[sc]e (?:no|number|#)|\bregistration (?:no|number|#)|\b(?:rcic|membership) ?(?:no|number|#|id)/.test(t))
+        add(10, "Mentions a licensed consultant but gives no licence number you could check", "immig");
+    }
     if (/(?:earn|make|salary|income|commission|pay|paid|receive)\b[^.\n]{0,40}\$?\d[\d,]*(?:\s*(?:-|–|to)\s*\$?\d[\d,]*)?\s*(?:usd |dollars? |rs\.? |rupees )?(?:daily|a day|per day|\/day|every day)|\b(?:paid|earn|get|receive)\s+\$?\d[\d,.]*\s*(?:usd |dollars? )?(?:per|for (?:each|every)|a) (?:like|review|rating|task|video|order|click)\b|\b(?:liking|rating|reviewing|subscribing to|following)\s+(?:youtube |tiktok |instagram )?(?:videos?|products?|hotels?|apps?|channels?|posts?)\b|\b(?:simple|easy) (?:online |remote )?tasks?\b[^.\n]{0,60}\b(?:earn|paid|pay|commission)/.test(t)
         || (/\b(?:app[- ]|product[- ]|hotel[- ]|video[- ])?(?:rating|reviewing|liking|clicking) tasks?\b/.test(t)
             && /\$|\busd\b|\bearn|\bpaid\b|commission|\bdaily\b|per day|a day\b/.test(t))) {
@@ -859,6 +874,7 @@ function createEngine(D, env) {
     else if (kinds.has("account") && lure.sc >= 30) category = "Social media account takeover";
     else if (kinds.has("billing") && lure.sc >= 30) category = "Billing / subscription scam";
     else if (kinds.has("health") && lure.sc >= 25) category = "Health / miracle-cure spam";
+    else if (kinds.has("immig") && lure.sc >= 40) category = "Immigration / visa fee scam";
     else if (kinds.has("callback")) category = "Callback phishing";
     else if ((kinds.has("toll") && lure.sc >= 40) || (lk.has("toll") && score >= 40)) category = "Toll / delivery fee scam";
     else if (spoof || lk.has("brand")) category = "Brand impersonation phishing";
