@@ -239,6 +239,19 @@ a.btn.ok{color:var(--ok-ink)} a.btn.danger{color:var(--t-critical)}
   <label class="langpick" title="Language"><span aria-hidden="true">🌐</span><select id="lang" aria-label="Language" data-i18n-aria="Language"></select></label>
   <span class="pill" id="status"><span class="dot"></span><span id="status-t">…</span></span>
 </header>
+<noscript>
+  <style>main,.tabbar,.tabs-top,#theme,.langpick,#status{display:none!important}
+    .noscript{box-sizing:border-box;width:calc(100% - 32px);max-width:560px;margin:24px auto;padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);line-height:1.5}
+    .noscript h1{font-size:1.2rem;margin:0 0 8px} .noscript p{margin:8px 0;color:var(--muted)}</style>
+  <div class="noscript">
+    <h1>PhishGuard needs JavaScript</h1>
+    <p>This browser is blocking scripts, so PhishGuard can't check messages. In Brave, tap the Shields (lion) icon and allow scripts for this site. In other browsers, turn JavaScript on. Checks still run only on your device.</p>
+    <p lang="es">Español: active JavaScript (en Brave: icono de Shields → permitir scripts).</p>
+    <p lang="ur" dir="rtl">اردو: JavaScript آن کریں (Brave میں: Shields آئیکن ← scripts کی اجازت دیں)۔</p>
+    <p lang="hi">हिन्दी: JavaScript चालू करें (Brave में: Shields आइकन → scripts की अनुमति दें)।</p>
+    <p lang="de">Deutsch: Bitte JavaScript aktivieren (in Brave: Shields-Symbol → Skripte erlauben).</p>
+  </div>
+</noscript>
 
 <main>
   <!-- sign-in (server with token) -->
@@ -507,16 +520,19 @@ async function prepareImage(file) {
   return {blob: blob || file, dataUrl: c.toDataURL("image/jpeg", 0.8), name: "screenshot.jpg"};
 }
 /* ── QR codes: decoded on this device (BarcodeDetector, or jsQR loaded on first use) ── */
-const JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+// Published next to the page (ocr/jsQR.js, see fetch_ocr.sh); the CDN is only a fallback.
+const JSQR_URLS = () => [new URL("ocr/jsQR.js", location.href).href, "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"];
 let jsqrLoading = null;
 function loadJsQR() {
   if (window.jsQR) return Promise.resolve(window.jsQR);
-  return jsqrLoading || (jsqrLoading = new Promise((res, rej) => {
-    const sc = document.createElement("script"); sc.src = JSQR_URL; sc.async = true;
+  const tryLoad = src => new Promise((res, rej) => {
+    const sc = document.createElement("script"); sc.src = src; sc.async = true;
     sc.onload = () => (window.jsQR ? res(window.jsQR) : rej(new Error("QR reader didn't load")));
-    sc.onerror = () => { jsqrLoading = null; rej(new Error("QR reader didn't load")); };
+    sc.onerror = () => rej(new Error("QR reader didn't load"));
     document.head.appendChild(sc);
-  }));
+  });
+  const [local, cdn] = JSQR_URLS();
+  return jsqrLoading || (jsqrLoading = tryLoad(local).catch(() => tryLoad(cdn)).catch(e => { jsqrLoading = null; throw e; }));
 }
 async function decodeQR(file) {
   let bmp;

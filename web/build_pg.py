@@ -219,7 +219,8 @@ async function scanApi(body) {  // the rules scan, then Google Safe Browsing on 
 }
 const ocrList = () => [...(SAMPLE && LIMITS && LIMITS.images ? ["Claude"] : []), ...(gemKey() ? ["Gemini"] : []), "On-device reader"];
 window.PGA = {
-  kind: "device", statusText: "On this device", where: "In Claude, on this device",
+  kind: "device", statusText: "On this device",
+  where: window.claude && window.claude.use ? "In Claude, on this device" : "In this browser, on this device",
   get aiReady() { return !!SAMPLE || !!gemKey(); },
   get aiName() { return SAMPLE ? "Claude" : gemKey() ? "Gemini" : "Claude"; },
   get aiLabel() { return SAMPLE && gemKey() ? "Claude, or Gemini as backup, when you ask" : SAMPLE ? "Claude, when you ask"
@@ -424,5 +425,26 @@ out = (head + "# ═════════════════════
        + engine + tail + icons_py + html_py + '\nif __name__ == "__main__":\n    main()\n')
 open(os.path.join(ROOT, "phishguard.py"), "w").write(out)
 open(os.path.join(HERE, "phishguard_app.html"), "w").write(DEVICE_HTML)
+
+# Installable-app files for the Vercel site; web/vercel_build.sh publishes them and adds WEB_HEAD to the page.
+# Kept out of phishguard_app.html itself, which is also published as a Claude artifact where these paths don't exist.
+WEB_HEAD = SERVER_HEAD.replace('<link rel="icon" href="/icons/icon-192.png">',
+                               '<link rel="icon" href="/favicon.ico" sizes="any">\n<link rel="icon" href="/icons/icon-192.png" type="image/png">')
+WEB_MANIFEST = {
+    "name": "PhishGuard", "short_name": "PhishGuard", "id": "/", "start_url": "/", "scope": "/",
+    "display": "standalone", "background_color": "#0b1020", "theme_color": "#0b1020",
+    "description": "Check texts, emails and screenshots for scams.",
+    "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+              {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}],
+}
+PWA = os.path.join(HERE, "pwa")
+os.makedirs(os.path.join(PWA, "icons"), exist_ok=True)
+for name, data in ICONS.items():
+    open(os.path.join(PWA, "icons", name), "wb").write(data)
+_fav = io.BytesIO()
+Image.open(io.BytesIO(ICONS["icon-192.png"])).save(_fav, "ICO", sizes=[(16, 16), (32, 32), (48, 48)])
+open(os.path.join(PWA, "favicon.ico"), "wb").write(_fav.getvalue())
+open(os.path.join(PWA, "manifest.webmanifest"), "w").write(json.dumps(WEB_MANIFEST, indent=1) + "\n")
+open(os.path.join(PWA, "head.html"), "w").write(WEB_HEAD + "\n")
 print(f"phishguard.py {len(out)/1024:.0f} KB · phishguard_app.html {len(DEVICE_HTML)/1024:.0f} KB · icons",
       {k: len(v) for k, v in ICONS.items()})

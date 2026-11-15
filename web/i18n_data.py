@@ -438,6 +438,7 @@ UI = [
     # adapter texts (where / privacy / why)
     ["Your PhishGuard server", "Su servidor PhishGuard", "آپ کا PhishGuard سرور", "आपका PhishGuard सर्वर"],
     ["In Claude, on this device", "En Claude, en este dispositivo", "Claude میں، اس ڈیوائس پر", "Claude में, इस डिवाइस पर"],
+    ["In this browser, on this device", "En este navegador, en este dispositivo", "اس براؤزر میں، اس ڈیوائس پر", "इस ब्राउज़र में, इस डिवाइस पर"],
     ["Messages are saved only on your server.", "Los mensajes se guardan solo en su servidor.", "پیغامات صرف آپ کے سرور پر محفوظ ہوتے ہیں۔",
      "मैसेज सिर्फ़ आपके सर्वर पर सहेजे जाते हैं।"],
     ["Messages are saved only on your server. Uploaded files are read and then discarded, entirely on your server.",

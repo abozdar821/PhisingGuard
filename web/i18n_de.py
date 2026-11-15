@@ -334,6 +334,7 @@ DE = {
     "Can't reach your PhishGuard server": "Ihr PhishGuard-Server ist nicht erreichbar",
     "Your PhishGuard server": "Ihr PhishGuard-Server",
     "In Claude, on this device": "In Claude, auf diesem Gerät",
+    "In this browser, on this device": "In diesem Browser, auf diesem Gerät",
     "Messages are saved only on your server.": "Nachrichten werden nur auf Ihrem Server gespeichert.",
     "Messages are saved only on your server. Uploaded files are read and then discarded, entirely on your server.":
         "Nachrichten werden nur auf Ihrem Server gespeichert. Hochgeladene Dateien werden gelesen und danach verworfen, vollständig auf Ihrem Server.",

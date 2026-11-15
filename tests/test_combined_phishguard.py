@@ -50,6 +50,31 @@ with mock.patch.object(m._requests, "get", side_effect=OSError("offline")):
     fb4 = c.post("/api/phishguard/feedback", json={"scan_id": r4["id"], "verdict": "scam"}).json
     vals = {x["value"] for x in fb4["learned"]}
     check("never learns google.com / paypal.com", "google.com" not in vals and "paypal.com" not in vals and "acct-verify-center.top" in vals, vals)
+    # shared platforms: learn the scammer's bucket / site / page, never the platform itself
+    check("learn key: storage bucket, own sub-domain, page on the platform, ordinary site",
+          [m._learn_key(l) for l in m.extract_links("https://storage.googleapis.com/BetMen/trusted.html?x=1 "
+                                                    "https://pay-toll-now.vercel.app/a https://docs.google.com/forms/d/e/1FAIpQ/viewform "
+                                                    "https://storage.googleapis.com/ https://shop.scamsite.com/x")]
+          == ["storage.googleapis.com/betmen", "pay-toll-now.vercel.app", "docs.google.com/forms/d/e/1faipq/viewform", "", "scamsite.com"])
+    cure = {"mode": "email", "sender": "20/20 Vision Wire <news@rcwfbvocaxy.web.id>", "subject": "Doctors stunned",
+            "body": "This simple trick reverses vision loss: https://storage.googleapis.com/betmenthemiseasy/trustedbycommunities.html "
+                    "and https://pay-cure-now.vercel.app/order"}
+    fb8 = c.post("/api/phishguard/feedback", json={"scan_id": scan(cure)["id"], "verdict": "scam"}).json
+    vals = {x["value"] for x in fb8["learned"]}
+    check("bucket/vercel scam: learns only the scammer's parts",
+          {"storage.googleapis.com/betmenthemiseasy", "pay-cure-now.vercel.app", "rcwfbvocaxy.web.id"} <= vals
+          and not vals & {"googleapis.com", "vercel.app", "web.id"}, vals)
+    trained = lambda r: any(f["module"] == "Your training" for f in r["flags"])
+    same_bucket = scan({"mode": "sms", "sender": "(410) 555-0144", "body": "Read this: https://storage.googleapis.com/betmenthemiseasy/other-page.html"})
+    check("…same bucket, new page → still recognised", trained(same_bucket), same_bucket["flags"])
+    others = scan({"mode": "sms", "sender": "(410) 555-0145", "body": "Our report: https://storage.googleapis.com/acme-reports/q3.pdf "
+                                                                    "and the app https://phising-guard.vercel.app/"})
+    check("…other buckets and other vercel.app sites → not affected", not trained(others), others["flags"])
+    old = os.path.join(tmp, "old.json")
+    json.dump({"iocs": {"senders": {}, "phones": {}, "domains": {d: {"added": "", "scan_id": "x", "category": "Scam"}
+                                                                for d in ("googleapis.com", "vercel.app", "real-scam.top")}}}, open(old, "w"))
+    check("…platforms learned by older versions are forgotten on load, and the cleanup is saved",
+          set(m.TrainingStore(old).data["iocs"]["domains"]) == {"real-scam.top"} == set(json.load(open(old))["iocs"]["domains"]))
     # safe feedback retracts + allow-lists
     fb5 = c.post("/api/phishguard/feedback", json={"scan_id": r1["id"], "verdict": "safe"}).json
     tr = c.get("/api/phishguard/training").json
